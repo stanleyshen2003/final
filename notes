@@ -1,0 +1,10 @@
+bazel run onos-local -- clean debug
+~/onos/tools/test/bin/onos localhost
+sudo mn --topo=linear,6 --controller=remote,ip=127.0.0.1,port=6653 --switch=ovs,protocols=OpenFlow14
+mvn clean install -DskipTests
+onos-app localhost install! target/bridge-1.0-SNAPSHOT.oar
+
+ssh -o "StrictHostKeyChecking=no" -o GlobalKnownHostsFile=/dev/null -o UserKnownHostsFile=/dev/null onos@localhost -p 8101
+
+
+mininet> h2 ifconfig h2-eth0 inet6 add 2001:db8::2 

@@ -6,6 +6,5 @@ main:
 	sudo ovs-docker add-port ovsbr eth3 R1 --ipaddress=172.20.0.2/16
 	sudo ovs-docker add-port ovsbr eth2 R3 --ipaddress=172.20.0.3/16
 	sudo ovs-docker add-port ovsbr eth3 R4 --ipaddress=172.20.0.4/16
-clean:
 	docker compose down
 	sudo ovs-vsctl del-br ovsbr
