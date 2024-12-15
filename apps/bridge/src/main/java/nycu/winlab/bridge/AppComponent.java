@@ -190,26 +190,21 @@ public class AppComponent {
                 return;
             }
 
-            if (ethPkt.getEtherType() == Ethernet.TYPE_IPV6) {
-                IPv6 ipv6Packet = (IPv6) ethPkt.getPayload();
-                // log.info("IPv6 packet recieved");
-                // log.info("IPv6 Next Header: `{}`", ipv6Packet.getNextHeader());
+            // if (ethPkt.getEtherType() == Ethernet.TYPE_IPV6) {
+            //     IPv6 ipv6Packet = (IPv6) ethPkt.getPayload();
                 
-                // Check if the packet uses ICMPv6 (IPv6 Next Header == ICMPv6 protocol number)
-                if (ipv6Packet.getNextHeader() == IPv6.PROTOCOL_ICMP6) {
-                    // log.info("it is an ICMPv6 packet");
-                    ICMP6 icmp6Packet = (ICMP6) ipv6Packet.getPayload();
-                    byte icmpType = icmp6Packet.getIcmpType();
-                    // log.info("ICMPv6 type: `{}`", icmpType);
-                    // log.info("reference: {}, {}", (byte)135, (byte)136);
+            //     // Check if the packet uses ICMPv6 (IPv6 Next Header == ICMPv6 protocol number)
+            //     if (ipv6Packet.getNextHeader() == IPv6.PROTOCOL_ICMP6) {
+            //         ICMP6 icmp6Packet = (ICMP6) ipv6Packet.getPayload();
+            //         byte icmpType = icmp6Packet.getIcmpType();
                     
-                    // Check if the ICMPv6 type is Neighbor Solicitation (135) or Neighbor Advertisement (136)
-                    if (icmpType == (byte)135 || icmpType == (byte)136) {
-                        return;
-                    }
+            //         // Check if the ICMPv6 type is Neighbor Solicitation (135) or Neighbor Advertisement (136)
+            //         if (icmpType == (byte)135 || icmpType == (byte)136) {
+            //             return;
+            //         }
                     
-                }
-            }
+            //     }
+            // }
 
             NeighborAdvertisement ndpAdv = findNDPAdv(ethPkt).orElse(null);
             NeighborSolicitation ndpSol = findNDPSol(ethPkt).orElse(null);

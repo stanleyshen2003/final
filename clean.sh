@@ -16,5 +16,6 @@ done
 
 ovs-vsctl del-br br1
 ovs-vsctl del-br br2
+sudo ip link delete bond0 type bond
 
 echo "Cleanup complete."
