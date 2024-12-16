@@ -18,4 +18,6 @@ ovs-vsctl del-br br1
 ovs-vsctl del-br br2
 sudo ip link delete bond0 type bond
 
+# docker network rm sdn_network
+
 echo "Cleanup complete."

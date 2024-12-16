@@ -9,6 +9,7 @@ fi
 # Creates a veth pair
 # params: endpoint1 endpoint2
 function create_veth_pair {
+    echo "Creating veth pair $1 $2"
     ip link add $1 type veth peer name $2
     ip link set $1 up
     ip link set $2 up
@@ -18,6 +19,14 @@ function create_veth_pair {
 # params: image_name container_name
 function add_container {
 	docker run -dit --network=none --label app=sdntest --privileged --cap-add NET_ADMIN --cap-add SYS_MODULE \
+		 --hostname $2 --name $2 ${@:3} $1
+	pid=$(docker inspect -f '{{.State.Pid}}' $(docker ps -aqf "name=$2"))
+	mkdir -p /var/run/netns
+	ln -s /proc/$pid/ns/net /var/run/netns/$pid
+}
+
+function add_container_custom_net {
+	docker run -dit --label app=sdntest --privileged --cap-add NET_ADMIN --cap-add SYS_MODULE \
 		 --hostname $2 --name $2 ${@:3} $1
 	pid=$(docker inspect -f '{{.State.Pid}}' $(docker ps -aqf "name=$2"))
 	mkdir -p /var/run/netns
@@ -115,10 +124,32 @@ function build_ovs_host_path_custom {
     set_v6intf_container $2 $container_inf $5
 }
 
+# Connects two containers
+# params: host_container1 router_container2 [ipaddress1] [ipaddress2] [ipv6address1] [ipv6address2] [gw addr] [gw v6 addr]
+function connect_containers_v4v6 {
+    inf1="veth$1$2"
+    inf2="veth$2$1"
+    create_veth_pair $inf1 $inf2
+    set_intf_container $1 $inf1 $3 $7
+    set_intf_container $2 $inf2 $4
+    set_v6intf_container $1 $inf1 $5 $8
+    set_v6intf_container $2 $inf2 $6
+}
+
 function add_onos {
     docker run -dit --name onos --hostname onos --privileged \
         -p 2620:2620 -p 6653:6653 -p 8101:8101 -p 8181:8181 \
         --tty --label app=sdntest sdnfv-final-onos
+    pid=$(docker inspect -f '{{.State.Pid}}' $(docker ps -aqf "name=onos"))
+    mkdir -p /var/run/netns
+    ln -s /proc/$pid/ns/net /var/run/netns/$pid
+
+    ip link add vethonos type veth peer name vethonos1
+    ip link set vethonos1 netns $pid
+    ip link set vethonos up
+    ip netns exec $pid ip link set vethonos1 up
+    ip addr add 192.168.100.2/24 dev vethonos
+    ip netns exec $pid ip addr add 192.168.100.1/24 dev vethonos1
 }
 
 function install_onos_apps {
@@ -161,10 +192,14 @@ ONOSIMAGE="sdnfv-final-onos"
 
 
 HOST1Name="host1"
-ROUTER1Name="router1"
+HOST2Name="host2"
+ROUTER1Name="r1"
+ROUTER2Name="r2"
 BONDName="bond0"
 OVS1Name="br1"
 OVS2Name="br2"
+
+DockerNetworkName="sdn_network"
 
 
 # Build host base image
@@ -187,15 +222,16 @@ add_onos
 add_container $HOSTIMAGE $HOST1Name
 add_container $ROUTERIMAGE $ROUTER1Name
 
+# Setting AS65530
 # add two bridges
 echo "Adding bridges"
 ovs-vsctl add-br $OVS1Name
 ovs-vsctl set bridge $OVS1Name protocols=OpenFlow14
-ovs-vsctl set-controller $OVS1Name tcp:127.0.0.1:6653
+ovs-vsctl set-controller $OVS1Name tcp:192.168.100.1:6653
 ovs-vsctl set bridge $OVS1Name other-config:datapath-id=0000000000000001
 ovs-vsctl add-br $OVS2Name
 ovs-vsctl set bridge $OVS2Name protocols=OpenFlow14
-ovs-vsctl set-controller $OVS2Name tcp:127.0.0.1:6653
+ovs-vsctl set-controller $OVS2Name tcp:192.168.100.1:6653
 ovs-vsctl set bridge $OVS2Name other-config:datapath-id=0000000000000002
 
 # Connect containers to bridges
@@ -224,6 +260,23 @@ build_ovs_path $OVS1Name $OVS2Name
 echo "Connecting ovs to host"
 build_ovs_container_path $OVS2Name $HOST1Name "172.16.${ID}.2/24" "172.16.${ID}.69"
 set_v6intf_container $HOST1Name "veth${HOST1Name}${OVS2Name}" "2a0b:4e07:c4:${ID}::2/64" "2a0b:4e07:c4:${ID}::69"
+
+# Setting AS65531
+echo "Adding containers for AS65531"
+
+# docker network create --subnet=172.17.${ID}.0/24 --gateway=172.17.${ID}.1 $DockerNetworkName
+
+add_container $ROUTERIMAGE  $ROUTER2Name
+add_container $HOSTIMAGE  $HOST2Name
+
+
+echo "Connecting ovs to router"
+build_ovs_container_path $OVS1Name $ROUTER2Name "192.168.63.2/24"
+set_v6intf_container $ROUTER2Name "veth${ROUTER2Name}${OVS1Name}" "fd63::2/64"
+
+echo "Connecting two containers"
+connect_containers_v4v6 $HOST2Name $ROUTER2Name "172.17.${ID}.2/24" "172.17.${ID}.1/24" "2a0b:4e07:c4:1${ID}::2/64" "2a0b:4e07:c4:1${ID}::1/64" "172.17.${ID}.1" "2a0b:4e07:c4:1${ID}::1" 
+
 
 
 install_onos_apps
