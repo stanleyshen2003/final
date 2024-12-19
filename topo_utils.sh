@@ -300,6 +300,16 @@ echo "Configuring routers"
 # docker exec $ROUTER1Name service frr restart
 # docker exec $ROUTER2Name service frr restart
 
+ip route add 10.0.0.0/24 dev wg0
+
+ovs-vsctl add-port $OVS2Name vxlan0 -- set interface vxlan0 type=vxlan options:remote_ip=192.168.60.53 options:dst_port=4789
+ip link add veth2onos type veth peer name veth2onospeer
+ip link set veth2onos up
+ip link set veth2onospeer up
+ip link set veth2onos master vethonos
+ovs-vsctl add-port $OVS2Name veth2onospeer
+
+
 
 # install_onos_apps
 echo "Done"
