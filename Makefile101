@@ -67,6 +67,9 @@ lab-02:
 	@$(call gen_host, "h2", "host")
 	@$(call gen_host, "R1", "host")
 	@$(call gen_host, "R2", "host")
+	@$(call connect, h1, R1, 192.168.1.2/24, 192.168.1.1/24)
+	@$(call connect, h3, h2, 192.168.1.2/24, 192.168.1.1/24)
+	@$(call connect, h3, h2, 192.168.1.2/24, 192.168.1.1/24)
 
 	#TODO write the code below to ensure that h1 can ping 192.168.1.2, which is h2's IP
 

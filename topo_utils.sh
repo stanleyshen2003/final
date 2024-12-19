@@ -137,19 +137,22 @@ function connect_containers_v4v6 {
 }
 
 function add_onos {
-    docker run -dit --name onos --hostname onos --privileged \
+
+    ip link add name vethonos type bridge
+    ip link set vethonos up
+    ip addr add 192.168.100.1/24 dev vethonos
+
+    docker run -dit --net=host --name onos --hostname onos --privileged \
         -p 2620:2620 -p 6653:6653 -p 8101:8101 -p 8181:8181 \
         --tty --label app=sdntest sdnfv-final-onos
     pid=$(docker inspect -f '{{.State.Pid}}' $(docker ps -aqf "name=onos"))
     mkdir -p /var/run/netns
     ln -s /proc/$pid/ns/net /var/run/netns/$pid
 
-    ip link add vethonos type veth peer name vethonos1
-    ip link set vethonos1 netns $pid
-    ip link set vethonos up
-    ip netns exec $pid ip link set vethonos1 up
-    ip addr add 192.168.100.2/24 dev vethonos
-    ip netns exec $pid ip addr add 192.168.100.1/24 dev vethonos1
+## ----------------??????????????????????????????????????????????????????????????????
+    ## 1. create dummy
+    ## 2. make router and host
+    ## 3. add --add-host host.docker.internal:host-gateway for R1?
 }
 
 function install_onos_apps {
@@ -220,7 +223,7 @@ fi
 add_onos
 # TODO Write your own code
 add_container $HOSTIMAGE $HOST1Name
-add_container $ROUTERIMAGE $ROUTER1Name
+add_container $ROUTERIMAGE $ROUTER1Name -v ./config/R1/frr.conf:/etc/frr/frr.conf -v ./config/daemons:/etc/frr/daemons
 
 # Setting AS65530
 # add two bridges
@@ -242,7 +245,7 @@ ip link set $BONDName up
 create_veth_pair_for_bond $ROUTER1Name $OVS1Name 0 $BONDName
 create_veth_pair_for_bond $ROUTER1Name $OVS1Name 1 $BONDName
 create_veth_pair_for_bond $ROUTER1Name $OVS1Name 2 $BONDName
-create_veth_pair_for_bond $ROUTER1Name $OVS1Name 3 $BONDName
+# create_veth_pair_for_bond $ROUTER1Name $OVS1Name 3 $BONDName
 
 ovs-vsctl add-port $OVS1Name bond0
 set_intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}0" "172.16.${ID}.69/24"
@@ -251,7 +254,18 @@ set_intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}1" "192.168.70.${I
 set_v6intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}1" "fd70::${ID}/64"
 set_intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}2" "192.168.63.1/24"
 set_v6intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}2" "fd63::1/64"
-set_intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}3" "192.168.100.3/24"
+# set_intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}3" "192.168.100.3/24"
+ip link add vethtoonos type veth peer name vethtoonospeer
+ip link set vethtoonos up
+ip link set vethtoonospeer up
+ip link set vethtoonospeer master vethonos
+temp=$(docker inspect -f '{{.State.Pid}}' $(docker ps -aqf "name=$ROUTER1Name"))
+ip link set vethtoonos netns $temp
+ip netns exec $temp ip addr add 192.168.100.3/24 dev vethtoonos
+ip netns exec $temp ip link set vethtoonos up
+ip netns exec $temp route add default gw 192.168.100.1/24
+
+
 
 
 
@@ -266,7 +280,7 @@ echo "Adding containers for AS65531"
 
 # docker network create --subnet=172.17.${ID}.0/24 --gateway=172.17.${ID}.1 $DockerNetworkName
 
-add_container $ROUTERIMAGE  $ROUTER2Name
+add_container $ROUTERIMAGE  $ROUTER2Name -v ./config/R2/frr.conf:/etc/frr/frr.conf -v ./config/daemons:/etc/frr/daemons
 add_container $HOSTIMAGE  $HOST2Name
 
 
@@ -277,7 +291,15 @@ set_v6intf_container $ROUTER2Name "veth${ROUTER2Name}${OVS1Name}" "fd63::2/64"
 echo "Connecting two containers"
 connect_containers_v4v6 $HOST2Name $ROUTER2Name "172.17.${ID}.2/24" "172.17.${ID}.1/24" "2a0b:4e07:c4:1${ID}::2/64" "2a0b:4e07:c4:1${ID}::1/64" "172.17.${ID}.1" "2a0b:4e07:c4:1${ID}::1" 
 
+# Configure routers
+echo "Configuring routers"
+# docker cp 
+# docker cp config/R2/frr.conf $ROUTER2Name:/etc/frr/frr.conf
+# docker cp config/daemons $ROUTER1Name:/etc/frr/daemons
+# docker cp config/daemons $ROUTER2Name:/etc/frr/daemons
+# docker exec $ROUTER1Name service frr restart
+# docker exec $ROUTER2Name service frr restart
 
 
-install_onos_apps
+# install_onos_apps
 echo "Done"
