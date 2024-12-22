@@ -6,5 +6,4 @@ onos-app localhost install! target/bridge-1.0-SNAPSHOT.oar
 
 ssh -o "StrictHostKeyChecking=no" -o GlobalKnownHostsFile=/dev/null -o UserKnownHostsFile=/dev/null onos@localhost -p 8101
 
-
-mininet> h2 ifconfig h2-eth0 inet6 add 2001:db8::2 
+onos-netcfg localhost config.json

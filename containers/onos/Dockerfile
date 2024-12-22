@@ -12,7 +12,7 @@ WORKDIR /root/onos
 # COPY ./ProxyNdp-1.0-SNAPSHOT.oar /root/onos/apps/
 
 # Set environment variables for ONOS apps
-ENV ONOS_APPS=drivers,fpm,openflow,hostprovider,lldpprovider,gui2,route-service,optical-model,bridge,ProxyArp,ProxyNdp,fwd
+ENV ONOS_APPS=drivers,fpm,openflow,hostprovider,lldpprovider,gui2,route-service,optical-model,bridge,ProxyArp
 ENV ONOS_IP=192.168.0.1
 
 # Install the app and start ONOS

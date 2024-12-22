@@ -16,7 +16,9 @@ done
 
 ovs-vsctl del-br br1
 ovs-vsctl del-br br2
-sudo ip link delete bond0 type bond
+ip link delete bond0 type bond
+
+wg-quick down wg0
 
 # docker network rm sdn_network
 

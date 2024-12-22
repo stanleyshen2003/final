@@ -221,12 +221,14 @@ if [[ $docker_images != *"$ONOSIMAGE"* ]]; then
 fi
 
 add_onos
-# TODO Write your own code
+
+wg-quick up wg0
+
 add_container $HOSTIMAGE $HOST1Name
 add_container $ROUTERIMAGE $ROUTER1Name -v ./config/R1/frr.conf:/etc/frr/frr.conf -v ./config/daemons:/etc/frr/daemons
 
 # Setting AS65530
-# add two bridges
+####
 echo "Adding bridges"
 ovs-vsctl add-br $OVS1Name
 ovs-vsctl set bridge $OVS1Name protocols=OpenFlow14
@@ -237,15 +239,13 @@ ovs-vsctl set bridge $OVS2Name protocols=OpenFlow14
 ovs-vsctl set-controller $OVS2Name tcp:192.168.100.1:6653
 ovs-vsctl set bridge $OVS2Name other-config:datapath-id=0000000000000002
 
-# Connect containers to bridges
-echo "Connecting ovs to router"
-# build_ovs_container_path $OVS1Name $ROUTER1Name "192.168.100.3/24"
+####
+echo "connect router1 to ovs1"
 ip link add $BONDName type bond
 ip link set $BONDName up
 create_veth_pair_for_bond $ROUTER1Name $OVS1Name 0 $BONDName
 create_veth_pair_for_bond $ROUTER1Name $OVS1Name 1 $BONDName
 create_veth_pair_for_bond $ROUTER1Name $OVS1Name 2 $BONDName
-# create_veth_pair_for_bond $ROUTER1Name $OVS1Name 3 $BONDName
 
 ovs-vsctl add-port $OVS1Name bond0
 set_intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}0" "172.16.${ID}.69/24"
@@ -254,7 +254,9 @@ set_intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}1" "192.168.70.${I
 set_v6intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}1" "fd70::${ID}/64"
 set_intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}2" "192.168.63.1/24"
 set_v6intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}2" "fd63::1/64"
-# set_intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}3" "192.168.100.3/24"
+
+####
+echo "add 192.168.100.3 to router 1 and connect to vethonos"
 ip link add vethtoonos type veth peer name vethtoonospeer
 ip link set vethtoonos up
 ip link set vethtoonospeer up
@@ -265,41 +267,29 @@ ip netns exec $temp ip addr add 192.168.100.3/24 dev vethtoonos
 ip netns exec $temp ip link set vethtoonos up
 ip netns exec $temp route add default gw 192.168.100.1/24
 
-
-
-
-
+####
 echo "Connecting two ovs"
 build_ovs_path $OVS1Name $OVS2Name
 echo "Connecting ovs to host"
 build_ovs_container_path $OVS2Name $HOST1Name "172.16.${ID}.2/24" "172.16.${ID}.69"
 set_v6intf_container $HOST1Name "veth${HOST1Name}${OVS2Name}" "2a0b:4e07:c4:${ID}::2/64" "2a0b:4e07:c4:${ID}::69"
 
-# Setting AS65531
+####
 echo "Adding containers for AS65531"
-
-# docker network create --subnet=172.17.${ID}.0/24 --gateway=172.17.${ID}.1 $DockerNetworkName
-
 add_container $ROUTERIMAGE  $ROUTER2Name -v ./config/R2/frr.conf:/etc/frr/frr.conf -v ./config/daemons:/etc/frr/daemons
 add_container $HOSTIMAGE  $HOST2Name
 
-
+####
 echo "Connecting ovs to router"
 build_ovs_container_path $OVS1Name $ROUTER2Name "192.168.63.2/24"
 set_v6intf_container $ROUTER2Name "veth${ROUTER2Name}${OVS1Name}" "fd63::2/64"
 
+####
 echo "Connecting two containers"
 connect_containers_v4v6 $HOST2Name $ROUTER2Name "172.17.${ID}.2/24" "172.17.${ID}.1/24" "2a0b:4e07:c4:1${ID}::2/64" "2a0b:4e07:c4:1${ID}::1/64" "172.17.${ID}.1" "2a0b:4e07:c4:1${ID}::1" 
 
-# Configure routers
-echo "Configuring routers"
-# docker cp 
-# docker cp config/R2/frr.conf $ROUTER2Name:/etc/frr/frr.conf
-# docker cp config/daemons $ROUTER1Name:/etc/frr/daemons
-# docker cp config/daemons $ROUTER2Name:/etc/frr/daemons
-# docker exec $ROUTER1Name service frr restart
-# docker exec $ROUTER2Name service frr restart
-
+####
+echo "Configuring router2 to TA's router"
 ip route add 10.0.0.0/24 dev wg0
 
 ovs-vsctl add-port $OVS2Name vxlan0 -- set interface vxlan0 type=vxlan options:remote_ip=192.168.60.53 options:dst_port=4789
