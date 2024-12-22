@@ -58,7 +58,11 @@ import org.onosproject.net.packet.DefaultOutboundPacket;
 import org.onosproject.net.packet.InboundPacket;
 import org.onosproject.net.packet.OutboundPacket;
 import org.onlab.packet.Ethernet;
+import org.onlab.packet.ICMP6;
+import org.onlab.packet.IPv6;
 import org.onlab.packet.MacAddress;
+import org.onlab.packet.ndp.NeighborAdvertisement;
+import org.onlab.packet.ndp.NeighborSolicitation;
 import org.onlab.packet.Ip4Address;
 import org.onlab.packet.ARP;
 import org.onlab.packet.Ip6Address;
@@ -69,8 +73,10 @@ import org.onosproject.net.Device;
 import org.onosproject.net.Port;
 import org.onosproject.net.ConnectPoint;
 
+import org.onlab.packet.ndp.NeighborSolicitation;
+import org.onlab.packet.ndp.NeighborAdvertisement;
+
 import org.onosproject.net.intent.*;
-import org.onosproject.net.intent.Key;
 import org.onosproject.net.FilteredConnectPoint;
 import org.onosproject.net.ConnectPoint;
 
@@ -136,6 +142,7 @@ public class AppComponent {
     private LearningBridgeProcessor processor = new LearningBridgeProcessor();
     private ApplicationId appId;
     private Map<Ip4Address, MacAddress> macTable = new HashMap<>();
+    private Map<Ip6Address, MacAddress> macTable6 = new HashMap<>();
     private Boolean BGPintent = false;
 
     private class NameConfigListener implements NetworkConfigListener {
@@ -168,6 +175,11 @@ public class AppComponent {
         selector.matchEthType(Ethernet.TYPE_ARP);
         packetService.requestPackets(selector.build(), PacketPriority.REACTIVE, appId);
 
+        TrafficSelector.Builder selector2 = DefaultTrafficSelector.builder();
+        selector2.matchEthType(Ethernet.TYPE_IPV6);
+        packetService.requestPackets(selector2.build(), PacketPriority.REACTIVE, appId);
+
+
 
         log.info("Started");
     }
@@ -188,6 +200,102 @@ public class AppComponent {
         packetService.cancelPackets(selector.build(), PacketPriority.REACTIVE, appId);
 
         log.info("Stopped");
+    }
+
+    
+    private Integer findNDP(Ethernet packet){
+        
+        if (packet.getEtherType() != Ethernet.TYPE_IPV6) {
+            return 0;
+        }
+
+        IPv6 ipv6Packet = (IPv6) packet.getPayload();
+        // Check if the packet uses ICMPv6 (IPv6 Next Header == ICMPv6 protocol number)
+        if (ipv6Packet.getNextHeader() != IPv6.PROTOCOL_ICMP6) {
+            return 0;
+        }
+        ICMP6 icmp6Packet = (ICMP6) ipv6Packet.getPayload();
+        byte icmpType = icmp6Packet.getIcmpType();
+        // log.info("ICMPv6 type: `{}`", icmpType);
+        // log.info("reference: {}, {}", (byte)135, (byte)136);
+        
+        // Check if the ICMPv6 type is Neighbor Solicitation (135) or Neighbor Advertisement (136)
+        if (icmpType == (byte)135) {
+            return 1;
+        } else if (icmpType == (byte)136) {
+            return 2;
+        }
+        return 0;
+        
+    }
+
+    private void processNDPSol(PacketContext context, NeighborSolicitation ndp) {
+         // get payload
+        Ethernet ethPkt = context.inPacket().parsed();
+        IPv6 ipv6Packet = (IPv6) ethPkt.getPayload();
+        DeviceId devID = context.inPacket().receivedFrom().deviceId();
+        PortNumber recPort = context.inPacket().receivedFrom().port();
+        Ip6Address srcIp = Ip6Address.valueOf(ipv6Packet.getSourceAddress());
+        MacAddress srcMac = ethPkt.getSourceMAC();
+        Ip6Address dstIp = Ip6Address.valueOf(ndp.getTargetAddress());
+
+        // write the srcIP if it is not written
+        if (macTable6.get(srcIp) == null) {
+            macTable6.put(srcIp, srcMac);
+            log.info("Add new entry. IP = {}, MAC = {}", srcIp, srcMac);
+        }
+
+
+        if (macTable6.get(dstIp) == null){
+            log.info("TABLE MISS. Send request to edge ports");
+            log.info("Missed IP = {}", dstIp);
+            // log.info("table miss devID: {}, src {} / {}, dst: {}, {}", devID, srcIp, srcMac, dstIp, dstMac);
+            flood(ethPkt, devID, recPort);
+        } else {
+            log.info("TABLE HIT. Requested MAC = {}, Required IP = {}", macTable6.get(dstIp), dstIp);
+            // log.info("table hit devID: {}, src {} / {}, dst: {}, {}", devID, srcIp, srcMac, dstIp, dstMac);
+
+            controller_reply6(ethPkt, dstIp, macTable6.get(dstIp), devID, recPort);
+        }
+    }
+
+    private void processNDPAdv(PacketContext context, NeighborAdvertisement ndp) {
+        // get payload
+        Ethernet ethPkt = context.inPacket().parsed();
+        IPv6 ipv6Packet = (IPv6) ethPkt.getPayload();
+        Ip6Address srcIp = Ip6Address.valueOf(ipv6Packet.getSourceAddress());
+        MacAddress srcMac = ethPkt.getSourceMAC();
+
+        macTable6.put(srcIp, srcMac);
+        controller_reply6(ethPkt, srcIp, srcMac, context.inPacket().receivedFrom().deviceId(), context.inPacket().receivedFrom().port());
+        log.info("Add new entry. IP = {}, MAC = {}", srcIp, srcMac);
+
+    }
+
+    private void controller_reply6(Ethernet ethPkt, Ip6Address dstIP, MacAddress dstMac,
+                                 DeviceId devID, PortNumber outPort) {
+        log.info("Controller reply");
+        log.info("dstIP: {}, dstMac: {}", dstIP, dstMac);
+        log.info("devID: {}, outPort: {}", devID, outPort);
+         // create Ethernet frame for ARP reply
+        Ethernet ethReply = NeighborAdvertisement.buildNdpAdv(dstIP, dstMac, ethPkt);
+        // flood(ethReply, devID, outPort);
+        
+        
+
+        // set port+
+        TrafficTreatment treatment = DefaultTrafficTreatment.builder()
+                .setOutput(outPort)
+                .build();
+        
+        // send to devices
+        OutboundPacket outboundPacket = new DefaultOutboundPacket(
+                devID,
+                treatment,
+                ByteBuffer.wrap(ethReply.serialize())
+        );
+        packetService.emit(outboundPacket);
+        
     }
 
     private void installBGPIntents(NameConfig config) {
@@ -212,8 +320,8 @@ public class AppComponent {
 
             log.info("Created intent from {}/{} to {}/{}", src.deviceId(), src.port(), dst.deviceId(), dst.port());
 
-            FilteredConnectPoint fsrc = new FilteredConnectPoint(src);
-            FilteredConnectPoint fdst = new FilteredConnectPoint(dst);
+            FilteredConnectPoint fsrc = new FilteredConnectPoint(src, selector1.build());
+            FilteredConnectPoint fdst = new FilteredConnectPoint(dst, selector2.build());
 
             PointToPointIntent intent1 = PointToPointIntent.builder()
                 .appId(appId)
@@ -243,10 +351,10 @@ public class AppComponent {
             Ip6Address peerIP2 = Ip6Address.valueOf(v6Peers.get(i+1));
             // install flow rule for ARP packets
             TrafficSelector.Builder selector1 = DefaultTrafficSelector.builder();
-            selector1.matchIPv6Src(peerIP1.toIpPrefix()).matchIPv6Dst(peerIP2.toIpPrefix()).matchEthType(Ethernet.TYPE_IPV6);
+            selector1.matchEthType(Ethernet.TYPE_IPV6).matchIPv6Src(peerIP1.toIpPrefix());
 
             TrafficSelector.Builder selector2 = DefaultTrafficSelector.builder();
-            selector2.matchIPv6Src(peerIP2.toIpPrefix()).matchIPv6Dst(peerIP1.toIpPrefix()).matchEthType(Ethernet.TYPE_IPV6);
+            selector2.matchEthType(Ethernet.TYPE_IPV6).matchIPv6Src(peerIP2.toIpPrefix());
             
             ConnectPoint src = new ConnectPoint(devID, port);
             ConnectPoint dst = interfaceService.getMatchingInterface(IpAddress.valueOf(v6Peers.get(i))).connectPoint();
@@ -304,6 +412,22 @@ public class AppComponent {
             PortNumber recPort = pkt.receivedFrom().port();
             DeviceId devID = pkt.receivedFrom().deviceId();
             if (ethPkt == null) {
+                return;
+            }
+
+            if (ethPkt.getEtherType() == Ethernet.TYPE_IPV6) {
+                Integer ndpType = findNDP(ethPkt);
+                if (ndpType == 0) {
+                    return;
+                }
+                if (ndpType == 1){
+                    log.info("NDP SOLICITATION");
+                    processNDPSol(context, (NeighborSolicitation) ethPkt.getPayload().getPayload().getPayload());
+                }
+                if (ndpType == 2){
+                    log.info("NDP ADVERTISEMENT");
+                    processNDPAdv(context, (NeighborAdvertisement) ethPkt.getPayload().getPayload().getPayload());
+                }
                 return;
             }
 

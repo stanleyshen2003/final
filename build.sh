@@ -11,6 +11,8 @@ fi
 function create_veth_pair {
     echo "Creating veth pair $1 $2"
     ip link add $1 type veth peer name $2
+    ip link set $1 mtu 3000
+    ip link set $2 mtu 3000
     ip link set $1 up
     ip link set $2 up
 }
@@ -140,6 +142,7 @@ function add_onos {
 
     ip link add name vethonos type bridge
     ip link set vethonos up
+    ip link set vethonos mtu 3000
     ip addr add 192.168.100.1/24 dev vethonos
 
     docker run -dit --net=host --name onos --hostname onos --privileged \
@@ -180,6 +183,8 @@ function create_veth_pair_for_bond {
     link_name="veth$1$2$3"
     peer_name="veth$2$1$3"
     ip link add $link_name type veth peer name $peer_name
+    ip link set $link_name mtu 3000
+    ip link set $peer_name mtu 3000
     ip link set $link_name master $4
     ip link set $link_name up
     ip link set $peer_name up
@@ -234,19 +239,25 @@ ovs-vsctl add-br $OVS1Name
 ovs-vsctl set bridge $OVS1Name protocols=OpenFlow14
 ovs-vsctl set-controller $OVS1Name tcp:192.168.100.1:6653
 ovs-vsctl set bridge $OVS1Name other-config:datapath-id=0000000000000001
+ovs-vsctl set interface $OVS1Name mtu_request=3000
 ovs-vsctl add-br $OVS2Name
 ovs-vsctl set bridge $OVS2Name protocols=OpenFlow14
 ovs-vsctl set-controller $OVS2Name tcp:192.168.100.1:6653
 ovs-vsctl set bridge $OVS2Name other-config:datapath-id=0000000000000002
+ovs-vsctl set interface $OVS1Name mtu_request=3000
+
 
 ####
-echo "connect router1 to ovs1"
+echo "Connect router1 to ovs1"
 ip link add $BONDName type bond
+ip link set $BONDName mtu 3000
 ip link set $BONDName up
+echo "Adding veth pairs for bond"
 create_veth_pair_for_bond $ROUTER1Name $OVS1Name 0 $BONDName
 create_veth_pair_for_bond $ROUTER1Name $OVS1Name 1 $BONDName
 create_veth_pair_for_bond $ROUTER1Name $OVS1Name 2 $BONDName
 
+echo "Adding bond to ovs"
 ovs-vsctl add-port $OVS1Name bond0
 set_intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}0" "172.16.${ID}.69/24"
 set_v6intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}0" "2a0b:4e07:c4:${ID}::69/64"
@@ -256,8 +267,10 @@ set_intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}2" "192.168.63.1/2
 set_v6intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}2" "fd63::1/64"
 
 ####
-echo "add 192.168.100.3 to router 1 and connect to vethonos"
+echo "Add 192.168.100.3 to router 1 and connect to vethonos"
 ip link add vethtoonos type veth peer name vethtoonospeer
+ip link set vethtoonospeer mtu 3000
+ip link set vethtoonos mtu 3000
 ip link set vethtoonos up
 ip link set vethtoonospeer up
 ip link set vethtoonospeer master vethonos
@@ -294,6 +307,8 @@ ip route add 10.0.0.0/24 dev wg0
 
 ovs-vsctl add-port $OVS2Name vxlan0 -- set interface vxlan0 type=vxlan options:remote_ip=192.168.60.53 options:dst_port=4789
 ip link add veth2onos type veth peer name veth2onospeer
+ip link set veth2onos mtu 3000
+ip link set veth2onospeer mtu 3000
 ip link set veth2onos up
 ip link set veth2onospeer up
 ip link set veth2onos master vethonos

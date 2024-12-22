@@ -122,6 +122,14 @@ public class AppComponent {
         selector.matchEthType(Ethernet.TYPE_IPV6);
         packetService.requestPackets(selector.build(), PacketPriority.REACTIVE, appId);
 
+        TrafficSelector.Builder selector2 = DefaultTrafficSelector.builder();
+        selector2.matchIcmpv6Type((byte)135);
+        packetService.requestPackets(selector2.build(), PacketPriority.REACTIVE, appId);
+
+        TrafficSelector.Builder selector3 = DefaultTrafficSelector.builder();
+        selector3.matchIcmpv6Type((byte)136);
+        packetService.requestPackets(selector3.build(), PacketPriority.REACTIVE, appId);
+
 
         log.info("Started");
     }
@@ -147,16 +155,7 @@ public class AppComponent {
 
 
     private Integer findNDP(Ethernet packet){
-        // log.info("findNDPAdv");
-        // return Stream.of(packet)
-        //         .filter(Objects::nonNull)
-        //         .map(Ethernet::getPayload)
-        //         .filter(p -> p instanceof IPv6)
-        //         .filter(Objects::nonNull)
-        //         .map(IPacket::getPayload)
-        //         .filter(p -> p instanceof NeighborAdvertisement)
-        //         .map(p -> (NeighborAdvertisement) p)
-        //         .findFirst();
+        
         if (packet.getEtherType() != Ethernet.TYPE_IPV6) {
             return 0;
         }
