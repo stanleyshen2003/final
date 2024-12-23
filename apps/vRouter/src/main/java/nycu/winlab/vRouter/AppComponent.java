@@ -277,11 +277,9 @@ public class AppComponent {
         log.info("Controller reply");
         log.info("dstIP: {}, dstMac: {}", dstIP, dstMac);
         log.info("devID: {}, outPort: {}", devID, outPort);
+        
          // create Ethernet frame for ARP reply
         Ethernet ethReply = NeighborAdvertisement.buildNdpAdv(dstIP, dstMac, ethPkt);
-        // flood(ethReply, devID, outPort);
-        
-        
 
         // set port+
         TrafficTreatment treatment = DefaultTrafficTreatment.builder()
