@@ -245,15 +245,11 @@ public class AppComponent {
             log.info("Add new entry. IP = {}, MAC = {}", srcIp, srcMac);
         }
 
-
         if (macTable6.get(dstIp) == null){
-            log.info("TABLE MISS. Send request to edge ports");
-            log.info("Missed IP = {}", dstIp);
-            // log.info("table miss devID: {}, src {} / {}, dst: {}, {}", devID, srcIp, srcMac, dstIp, dstMac);
+            log.info("TABLE MISS. Missed IP = {}", dstIp);
             flood(ethPkt, devID, recPort);
         } else {
             log.info("TABLE HIT. Requested MAC = {}, Required IP = {}", macTable6.get(dstIp), dstIp);
-            // log.info("table hit devID: {}, src {} / {}, dst: {}, {}", devID, srcIp, srcMac, dstIp, dstMac);
 
             controller_reply6(ethPkt, dstIp, macTable6.get(dstIp), devID, recPort);
         }
@@ -453,7 +449,7 @@ public class AppComponent {
                 }
 
                 if (macTable.get(dstIp) == null){
-                    log.info("TABLE MISS. Send request to edge ports");
+                    log.info("TABLE MISS on IP = {}", dstIp);
                     // log.info("table miss devID: {}, src {} / {}, dst: {}, {}", devID, srcIp, srcMac, dstIp, dstMac);
                     flood(ethPkt, devID, recPort);
                 } else {

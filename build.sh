@@ -15,6 +15,8 @@ function create_veth_pair {
     ip link set $2 mtu 3000
     ip link set $1 up
     ip link set $2 up
+    ip addr flush dev $1
+    ip addr flush dev $2
 }
 
 # Add a container with a certain image
@@ -142,6 +144,7 @@ function add_onos {
 
     ip link add name vethonos type bridge
     ip link set vethonos up
+    ip addr flush dev vethonos
     ip link set vethonos mtu 3000
     ip addr add 192.168.100.1/24 dev vethonos
 
@@ -188,6 +191,8 @@ function create_veth_pair_for_bond {
     ip link set $link_name master $4
     ip link set $link_name up
     ip link set $peer_name up
+    ip addr flush dev $link_name
+    ip addr flush dev $peer_name
 }
 
 
@@ -252,6 +257,8 @@ echo "Connect router1 to ovs1"
 ip link add $BONDName type bond
 ip link set $BONDName mtu 3000
 ip link set $BONDName up
+ip addr flush dev $BONDName
+
 echo "Adding veth pairs for bond"
 create_veth_pair_for_bond $ROUTER1Name $OVS1Name 0 $BONDName
 create_veth_pair_for_bond $ROUTER1Name $OVS1Name 1 $BONDName
@@ -273,6 +280,8 @@ ip link set vethtoonospeer mtu 3000
 ip link set vethtoonos mtu 3000
 ip link set vethtoonos up
 ip link set vethtoonospeer up
+ip addr flush dev vethtoonos
+ip addr flush dev vethtoonospeer
 ip link set vethtoonospeer master vethonos
 temp=$(docker inspect -f '{{.State.Pid}}' $(docker ps -aqf "name=$ROUTER1Name"))
 ip link set vethtoonos netns $temp
@@ -311,6 +320,8 @@ ip link set veth2onos mtu 3000
 ip link set veth2onospeer mtu 3000
 ip link set veth2onos up
 ip link set veth2onospeer up
+ip addr flush dev veth2onos
+ip addr flush dev veth2onospeer
 ip link set veth2onos master vethonos
 ovs-vsctl add-port $OVS2Name veth2onospeer
 
