@@ -47,9 +47,9 @@ import org.onosproject.net.flow.TrafficSelector;
 
 import org.onosproject.net.flow.DefaultTrafficTreatment;
 import org.onosproject.net.flow.TrafficTreatment;
-
+import org.onosproject.net.flowobjective.DefaultForwardingObjective;
 import org.onosproject.net.flowobjective.FlowObjectiveService;
-
+import org.onosproject.net.flowobjective.ForwardingObjective;
 import org.onosproject.net.packet.PacketPriority;
 import org.onosproject.net.packet.PacketService;
 import org.onosproject.net.packet.PacketProcessor;
@@ -60,11 +60,13 @@ import org.onosproject.net.packet.OutboundPacket;
 import org.onlab.packet.Ethernet;
 import org.onlab.packet.ICMP6;
 import org.onlab.packet.IPv6;
+import org.onlab.packet.IPv4;
 import org.onlab.packet.MacAddress;
 import org.onlab.packet.ndp.NeighborAdvertisement;
 import org.onlab.packet.ndp.NeighborSolicitation;
 import org.onlab.packet.Ip4Address;
 import org.onlab.packet.ARP;
+import org.onlab.packet.EthType;
 import org.onlab.packet.Ip6Address;
 
 import org.onosproject.net.PortNumber;
@@ -89,6 +91,7 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import org.apache.commons.lang3.tuple.Pair;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.jar.Attributes.Name;
@@ -143,6 +146,9 @@ public class AppComponent {
     private ApplicationId appId;
     private Map<Ip4Address, MacAddress> macTable = new HashMap<>();
     private Map<Ip6Address, MacAddress> macTable6 = new HashMap<>();
+    private Map<DeviceId, Map<Pair<MacAddress, Ip4Address>, PortNumber>> bridgeTable = new HashMap<>();
+    private Map<DeviceId, Map<Pair<MacAddress, Ip6Address>, PortNumber>> bridgeTable6 = new HashMap<>();
+
     private Boolean BGPintent = false;
 
     private class NameConfigListener implements NetworkConfigListener {
@@ -179,6 +185,10 @@ public class AppComponent {
         selector2.matchEthType(Ethernet.TYPE_IPV6);
         packetService.requestPackets(selector2.build(), PacketPriority.REACTIVE, appId);
 
+        TrafficSelector.Builder selector3 = DefaultTrafficSelector.builder();
+        selector3.matchEthType(Ethernet.TYPE_IPV4);
+        packetService.requestPackets(selector3.build(), PacketPriority.REACTIVE, appId);
+
 
 
         log.info("Started");
@@ -199,6 +209,14 @@ public class AppComponent {
         selector.matchEthType(Ethernet.TYPE_ARP);
         packetService.cancelPackets(selector.build(), PacketPriority.REACTIVE, appId);
 
+        TrafficSelector.Builder selector2 = DefaultTrafficSelector.builder();
+        selector2.matchEthType(Ethernet.TYPE_IPV6);
+        packetService.cancelPackets(selector2.build(), PacketPriority.REACTIVE, appId);
+
+        TrafficSelector.Builder selector3 = DefaultTrafficSelector.builder();
+        selector3.matchEthType(Ethernet.TYPE_IPV4);
+        packetService.cancelPackets(selector3.build(), PacketPriority.REACTIVE, appId);
+
         log.info("Stopped");
     }
 
@@ -210,14 +228,13 @@ public class AppComponent {
         }
 
         IPv6 ipv6Packet = (IPv6) packet.getPayload();
+        
         // Check if the packet uses ICMPv6 (IPv6 Next Header == ICMPv6 protocol number)
         if (ipv6Packet.getNextHeader() != IPv6.PROTOCOL_ICMP6) {
             return 0;
         }
         ICMP6 icmp6Packet = (ICMP6) ipv6Packet.getPayload();
         byte icmpType = icmp6Packet.getIcmpType();
-        // log.info("ICMPv6 type: `{}`", icmpType);
-        // log.info("reference: {}, {}", (byte)135, (byte)136);
         
         // Check if the ICMPv6 type is Neighbor Solicitation (135) or Neighbor Advertisement (136)
         if (icmpType == (byte)135) {
@@ -233,8 +250,6 @@ public class AppComponent {
          // get payload
         Ethernet ethPkt = context.inPacket().parsed();
         IPv6 ipv6Packet = (IPv6) ethPkt.getPayload();
-        DeviceId devID = context.inPacket().receivedFrom().deviceId();
-        PortNumber recPort = context.inPacket().receivedFrom().port();
         Ip6Address srcIp = Ip6Address.valueOf(ipv6Packet.getSourceAddress());
         MacAddress srcMac = ethPkt.getSourceMAC();
         Ip6Address dstIp = Ip6Address.valueOf(ndp.getTargetAddress());
@@ -247,11 +262,8 @@ public class AppComponent {
 
         if (macTable6.get(dstIp) == null){
             log.info("TABLE MISS. Missed IP = {}", dstIp);
-            flood(ethPkt, devID, recPort);
         } else {
             log.info("TABLE HIT. Requested MAC = {}, Required IP = {}", macTable6.get(dstIp), dstIp);
-
-            controller_reply6(ethPkt, dstIp, macTable6.get(dstIp), devID, recPort);
         }
     }
 
@@ -262,34 +274,10 @@ public class AppComponent {
         Ip6Address srcIp = Ip6Address.valueOf(ipv6Packet.getSourceAddress());
         MacAddress srcMac = ethPkt.getSourceMAC();
 
-        macTable6.put(srcIp, srcMac);
-        controller_reply6(ethPkt, srcIp, srcMac, context.inPacket().receivedFrom().deviceId(), context.inPacket().receivedFrom().port());
-        log.info("Add new entry. IP = {}, MAC = {}", srcIp, srcMac);
-
-    }
-
-    private void controller_reply6(Ethernet ethPkt, Ip6Address dstIP, MacAddress dstMac,
-                                 DeviceId devID, PortNumber outPort) {
-        log.info("Controller reply");
-        log.info("dstIP: {}, dstMac: {}", dstIP, dstMac);
-        log.info("devID: {}, outPort: {}", devID, outPort);
-        
-         // create Ethernet frame for ARP reply
-        Ethernet ethReply = NeighborAdvertisement.buildNdpAdv(dstIP, dstMac, ethPkt);
-
-        // set port+
-        TrafficTreatment treatment = DefaultTrafficTreatment.builder()
-                .setOutput(outPort)
-                .build();
-        
-        // send to devices
-        OutboundPacket outboundPacket = new DefaultOutboundPacket(
-                devID,
-                treatment,
-                ByteBuffer.wrap(ethReply.serialize())
-        );
-        packetService.emit(outboundPacket);
-        
+        if (macTable6.get(srcIp) == null) {
+            macTable6.put(srcIp, srcMac);
+            log.info("Add new entry. IP = {}, MAC = {}", srcIp, srcMac);
+        }
     }
 
     private void installBGPIntents(NameConfig config) {
@@ -399,79 +387,125 @@ public class AppComponent {
                 log.info("BGP intents installed");
             }
 
-
             InboundPacket pkt = context.inPacket();
             Ethernet ethPkt = pkt.parsed();
-
             PortNumber recPort = pkt.receivedFrom().port();
-            DeviceId devID = pkt.receivedFrom().deviceId();
+            DeviceId recDevId = pkt.receivedFrom().deviceId();
+            
             if (ethPkt == null) {
                 return;
             }
+            short ethType = ethPkt.getEtherType();
 
-            if (ethPkt.getEtherType() == Ethernet.TYPE_IPV6) {
+            if (ethType == Ethernet.TYPE_IPV6) {
                 Integer ndpType = findNDP(ethPkt);
-                if (ndpType == 0) {
-                    return;
-                }
                 if (ndpType == 1){
-                    log.info("NDP SOLICITATION");
                     processNDPSol(context, (NeighborSolicitation) ethPkt.getPayload().getPayload().getPayload());
                 }
-                if (ndpType == 2){
-                    log.info("NDP ADVERTISEMENT");
+                else if (ndpType == 2){
                     processNDPAdv(context, (NeighborAdvertisement) ethPkt.getPayload().getPayload().getPayload());
                 }
-                return;
             }
 
-            if (ethPkt.getEtherType() != Ethernet.TYPE_ARP) {
-                return;
-            }
+            // ARP packet
+            else if ( ethType == Ethernet.TYPE_ARP) {
+                ARP arpPacket = (ARP) ethPkt.getPayload();
 
-            ARP arpPacket = (ARP) ethPkt.getPayload();
-            
-            // get payload
-            Ip4Address srcIp = Ip4Address.valueOf(arpPacket.getSenderProtocolAddress());
-            MacAddress srcMac = MacAddress.valueOf(arpPacket.getSenderHardwareAddress());
-            Ip4Address dstIp = Ip4Address.valueOf(arpPacket.getTargetProtocolAddress());
-            MacAddress dstMac = MacAddress.valueOf(arpPacket.getTargetHardwareAddress());
+                // get payload
+                Ip4Address srcIp = Ip4Address.valueOf(arpPacket.getSenderProtocolAddress());
+                MacAddress srcMac = MacAddress.valueOf(arpPacket.getSenderHardwareAddress());
+                Ip4Address dstIp = Ip4Address.valueOf(arpPacket.getTargetProtocolAddress());
 
-            // rec packet-in from host, create a row for the host
-            
-            // if it is a request packet
-            if (arpPacket.getOpCode() == ARP.OP_REQUEST){
+                    
+                // if it is a request packet
+                if (arpPacket.getOpCode() == ARP.OP_REQUEST){
 
-                // write the srcIP if it is not written
-                if (macTable.get(srcIp) == null) {
+                    // write the srcIP if it is not written
+                    if (macTable.get(srcIp) == null) {
+                        macTable.put(srcIp, srcMac);
+                        log.info("Add new entry. IP = {}, MAC = {}", srcIp, srcMac);
+                    }
+
+                    if (macTable.get(dstIp) == null){
+                        log.info("TABLE MISS on IP = {}", dstIp);
+                        flood_to_all(ethPkt, recDevId, recPort);
+                    } else {
+                        log.info("TABLE HIT. Requested MAC = {}", macTable.get(dstIp));
+                        controller_reply(ethPkt, dstIp, macTable.get(dstIp), recDevId, recPort);
+                    }
+                }
+                else if (arpPacket.getOpCode() == ARP.OP_REPLY) {
                     macTable.put(srcIp, srcMac);
                     log.info("Add new entry. IP = {}, MAC = {}", srcIp, srcMac);
+
                 }
-
-                if (macTable.get(dstIp) == null){
-                    log.info("TABLE MISS on IP = {}", dstIp);
-                    // log.info("table miss devID: {}, src {} / {}, dst: {}, {}", devID, srcIp, srcMac, dstIp, dstMac);
-                    flood(ethPkt, devID, recPort);
-                } else {
-                    log.info("TABLE HIT. Requested MAC = {}", macTable.get(dstIp));
-                    // log.info("table hit devID: {}, src {} / {}, dst: {}, {}", devID, srcIp, srcMac, dstIp, dstMac);
-
-                    controller_reply(ethPkt, dstIp, macTable.get(dstIp), devID, recPort);
-                }
-            }
-            else if (arpPacket.getOpCode() == ARP.OP_REPLY) {
-                macTable.put(srcIp, srcMac);
-                log.info("Add new entry. IP = {}, MAC = {}", srcIp, srcMac);
-                // log.info("recv reply devID: {}, src {} / {}, dst: {}, {}", devID, srcIp, srcMac, dstIp, dstMac);
-
+                context.block();
+                return;
             }
 
-            context.block();
+            if (ethType == Ethernet.TYPE_IPV4) {
+                MacAddress srcMac = ethPkt.getSourceMAC();
+                Ip4Address srcIp = Ip4Address.valueOf(((IPv4) ethPkt.getPayload()).getSourceAddress());
+                MacAddress dstMac = ethPkt.getDestinationMAC();
+                Ip4Address dstIp = Ip4Address.valueOf(((IPv4) ethPkt.getPayload()).getDestinationAddress());
+                if (bridgeTable.get(recDevId) == null) {
+                    bridgeTable.put(recDevId, new HashMap<>());
+                }
+
+                if (bridgeTable.get(recDevId).get(Pair.of(srcMac, srcIp)) == null) {
+                    // the mapping of pkt's src mac and receivedfrom port wasn't store in the table of the rec device
+                    log.info("Add an entry to the port table of `{}`. MAC address: `{}`, IPv4 Address: `{}` => Port: `{}`.",
+                            recDevId, srcMac, srcIp, recPort);
+                    bridgeTable.get(recDevId).put(Pair.of(srcMac, srcIp), recPort);
+                }
+
+                if (bridgeTable.get(recDevId).get(Pair.of(dstMac, dstIp)) == null) {
+                    // the mapping of dst mac and forwarding port wasn't store in the table of the rec device
+                    flood(context, dstMac, recDevId);
+    
+                } 
+                else if (bridgeTable.get(recDevId).get(Pair.of(dstMac, dstIp)) != null) {
+                    // there is a entry store the mapping of dst mac and forwarding port
+                    installRule(context, srcMac, dstMac, srcIp, dstIp, recDevId, bridgeTable.get(recDevId).get(Pair.of(dstMac, dstIp)));
+                    packetOut(context, bridgeTable.get(recDevId).get(Pair.of(dstMac, dstIp)));
+                }
+                context.block();
+            }
+
+
+            if (ethType == Ethernet.TYPE_IPV6) {
+                MacAddress srcMac = ethPkt.getSourceMAC();
+                Ip6Address srcIp = Ip6Address.valueOf(((IPv6) ethPkt.getPayload()).getSourceAddress());
+                MacAddress dstMac = ethPkt.getDestinationMAC();
+                Ip6Address dstIp = Ip6Address.valueOf(((IPv6) ethPkt.getPayload()).getDestinationAddress());
+                if (bridgeTable6.get(recDevId) == null) {
+                    bridgeTable6.put(recDevId, new HashMap<>());
+                }
+
+                if (bridgeTable6.get(recDevId).get(Pair.of(srcMac, srcIp)) == null) {
+                    // the mapping of pkt's src mac and receivedfrom port wasn't store in the table of the rec device
+                    log.info("Add an entry to the port table of `{}`. MAC address: `{}`, IPv4 Address: `{}` => Port: `{}`.",
+                            recDevId, srcMac, srcIp, recPort);
+                    bridgeTable6.get(recDevId).put(Pair.of(srcMac, srcIp), recPort);
+                }
+
+                if (bridgeTable6.get(recDevId).get(Pair.of(dstMac, dstIp)) == null) {
+                    // the mapping of dst mac and forwarding port wasn't store in the table of the rec device
+                    flood(context, dstMac, recDevId);
+    
+                } 
+                else if (bridgeTable6.get(recDevId).get(Pair.of(dstMac, dstIp)) != null) {
+                    // there is a entry store the mapping of dst mac and forwarding port
+                    installRule6(context, srcMac, dstMac, srcIp, dstIp, recDevId, bridgeTable6.get(recDevId).get(Pair.of(dstMac, dstIp)));
+                    packetOut(context, bridgeTable6.get(recDevId).get(Pair.of(dstMac, dstIp)));
+                }
+                context.block();
+            }
 
         }
     }
 
-    private void flood(Ethernet ethPkt, DeviceId devID, PortNumber inPort) {
+    private void flood_to_all(Ethernet ethPkt, DeviceId devID, PortNumber inPort) {
         // all devices
         for (ConnectPoint edgePort : edgePortService.getEdgePoints()) {
             DeviceId outDevID = edgePort.deviceId();
@@ -522,6 +556,76 @@ public class AppComponent {
         
     }
 
-// ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+    private void flood(PacketContext context, MacAddress dstMac, DeviceId recDevId) {
+        // log.info("MAC address `{}` is missed on `{}`. Flood the packet.", dstMac, recDevId);
+        packetOut(context, PortNumber.FLOOD);
+    }
+
+    private void packetOut(PacketContext context, PortNumber portNumber) {
+        context.treatmentBuilder().setOutput(portNumber);
+        context.send();
+    }
+
+    private void installRule(PacketContext context, MacAddress srcMac, MacAddress dstMac, Ip4Address srcIp, Ip4Address dstIp,
+                             DeviceId recDevId, PortNumber outPort) {
+        log.info("MAC address `{}` is matched on `{}`. Install a flow rule.", dstMac, recDevId);
+
+        TrafficSelector.Builder selectorBuilder = DefaultTrafficSelector.builder()
+                    .matchEthType(Ethernet.TYPE_IPV4)
+                    .matchEthDst(dstMac)
+                    .matchEthSrc(srcMac)
+                    .matchIPSrc(srcIp.toIpPrefix())
+                    .matchIPDst(dstIp.toIpPrefix());
+
+        TrafficTreatment treatment = DefaultTrafficTreatment.builder()
+                    .setOutput(outPort)
+                    .build();
+
+        ForwardingObjective forwardingObjective = DefaultForwardingObjective.builder()
+                    .withSelector(selectorBuilder.build())
+                    .withTreatment(treatment)
+                    .withPriority(30)
+                    .withFlag(ForwardingObjective.Flag.VERSATILE)
+                    .fromApp(appId)
+                    .makeTemporary(300)
+                    .add();
+
+        flowObjectiveService.forward(recDevId, forwardingObjective);
+
+        packetOut(context, outPort);
+    }
+
+
+    private void installRule6(PacketContext context, MacAddress srcMac, MacAddress dstMac, Ip6Address srcIp, Ip6Address dstIp,
+                             DeviceId recDevId, PortNumber outPort) {
+        log.info("MAC address `{}` is matched on `{}`. Install a flow rule.", dstMac, recDevId);
+
+        TrafficSelector.Builder selectorBuilder = DefaultTrafficSelector.builder()
+                    .matchEthType(Ethernet.TYPE_IPV6)
+                    .matchEthDst(dstMac)
+                    .matchEthSrc(srcMac)
+                    .matchIPv6Dst(dstIp.toIpPrefix())
+                    .matchIPv6Src(srcIp.toIpPrefix());
+
+        TrafficTreatment treatment = DefaultTrafficTreatment.builder()
+                    .setOutput(outPort)
+                    .build();
+
+        ForwardingObjective forwardingObjective = DefaultForwardingObjective.builder()
+                    .withSelector(selectorBuilder.build())
+                    .withTreatment(treatment)
+                    .withPriority(30)
+                    .withFlag(ForwardingObjective.Flag.VERSATILE)
+                    .fromApp(appId)
+                    .makeTemporary(300)
+                    .add();
+
+        flowObjectiveService.forward(recDevId, forwardingObjective);
+
+        packetOut(context, outPort);
+    }
+
+    // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 }
