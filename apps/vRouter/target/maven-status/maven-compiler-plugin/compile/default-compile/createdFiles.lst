@@ -1,6 +1,7 @@
 nycu/winlab/vRouter/AppComponent$LearningBridgeProcessor.class
-nycu/winlab/vRouter/SomeInterface.class
 nycu/winlab/vRouter/NameConfig.class
 nycu/winlab/vRouter/AppComponent.class
 nycu/winlab/vRouter/AppComponent$NameConfigListener.class
 nycu/winlab/vRouter/AppComponent$1.class
+nycu/winlab/vRouter/SomeInterface.class
+nycu/winlab/vRouter/AppComponent$ProxyArpHandler.class

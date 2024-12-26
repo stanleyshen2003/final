@@ -37,7 +37,10 @@ import org.slf4j.LoggerFactory;
 
 
 import org.onosproject.net.intf.InterfaceService;
+import org.onosproject.net.intf.Interface;
+import org.onosproject.routeservice.*;
 
+import org.onosproject.net.host.*;
 
 
 import org.onosproject.core.ApplicationId;
@@ -50,6 +53,7 @@ import org.onosproject.net.flow.TrafficTreatment;
 import org.onosproject.net.flowobjective.DefaultForwardingObjective;
 import org.onosproject.net.flowobjective.FlowObjectiveService;
 import org.onosproject.net.flowobjective.ForwardingObjective;
+import org.onosproject.net.host.InterfaceIpAddress;
 import org.onosproject.net.packet.PacketPriority;
 import org.onosproject.net.packet.PacketService;
 import org.onosproject.net.packet.PacketProcessor;
@@ -65,6 +69,8 @@ import org.onlab.packet.MacAddress;
 import org.onlab.packet.ndp.NeighborAdvertisement;
 import org.onlab.packet.ndp.NeighborSolicitation;
 import org.onlab.packet.Ip4Address;
+import org.onlab.packet.Ip4Prefix;
+import org.onlab.packet.Ip6Prefix;
 import org.onlab.packet.ARP;
 import org.onlab.packet.EthType;
 import org.onlab.packet.Ip6Address;
@@ -80,21 +86,26 @@ import org.onlab.packet.ndp.NeighborAdvertisement;
 
 import org.onosproject.net.intent.*;
 import org.onosproject.net.FilteredConnectPoint;
+import org.onosproject.net.Host;
 import org.onosproject.net.ConnectPoint;
-
-
 import org.onosproject.net.edge.EdgePortService;
 import org.onosproject.net.device.DeviceService;
 import org.onosproject.net.flow.FlowRuleService;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import org.apache.commons.lang3.tuple.Pair;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.jar.Attributes.Name;
+
+import javax.crypto.Mac;
+
 import java.nio.ByteBuffer;
 
 /**
@@ -142,14 +153,29 @@ public class AppComponent {
     @Reference(cardinality = ReferenceCardinality.MANDATORY)
     protected IntentService intentService;
 
+    @Reference(cardinality = ReferenceCardinality.MANDATORY)
+    protected RouteService routeService;
+
+    @Reference(cardinality = ReferenceCardinality.MANDATORY)
+    protected HostService hostService;
+
     private LearningBridgeProcessor processor = new LearningBridgeProcessor();
+    private ProxyArpHandler arpHandler = new ProxyArpHandler();
+
     private ApplicationId appId;
     private Map<Ip4Address, MacAddress> macTable = new HashMap<>();
     private Map<Ip6Address, MacAddress> macTable6 = new HashMap<>();
     private Map<DeviceId, Map<Pair<MacAddress, Ip4Address>, PortNumber>> bridgeTable = new HashMap<>();
     private Map<DeviceId, Map<Pair<MacAddress, Ip6Address>, PortNumber>> bridgeTable6 = new HashMap<>();
-
+    private Map<Ip4Prefix, Ip4Address> routeTable = new HashMap<>();
+    private Map<Ip6Prefix, Ip6Address> routeTable6 = new HashMap<>();
+    private Set<Pair<DeviceId, PortNumber>> vrouter = new HashSet<>();
     private Boolean BGPintent = false;
+
+    private Map<Ip4Address, MacAddress> arpTable = new HashMap<>();
+    private Map<MacAddress, ConnectPoint> portTable = new HashMap<>();
+
+
 
     private class NameConfigListener implements NetworkConfigListener {
         @Override
@@ -160,9 +186,19 @@ public class AppComponent {
                 if (config != null) {
                     log.info("vrrouting: {}", config.vrrouting());
                 }
+                
+
+                for (Interface inf : interfaceService.getInterfaces()) {
+                    vrouter.add(Pair.of(inf.connectPoint().deviceId(), inf.connectPoint().port()));
+                }
+
             }
         }
     }
+
+    
+
+    
 
     @Activate
     protected void activate() {
@@ -172,14 +208,35 @@ public class AppComponent {
         cfgService.addListener(cfgListener);
         cfgService.registerConfigFactory(factory);
 
+        // vrouter = Collections.emptySet();
+        // for (Interface inf : interfaceService.getInterfaces()) {
+        //     vrouter.add(Pair.of(inf.connectPoint().deviceId(), inf.connectPoint().port()));
+        // }
+        NameConfig config = cfgService.getConfig(appId, NameConfig.class);
+        installBGPIntents(config);
+
+        for (Interface inf : interfaceService.getInterfaces()) {
+            for (InterfaceIpAddress ip : inf.ipAddressesList()) {
+                if (ip.ipAddress().isIp4()) {
+                    arpTable.put(ip.ipAddress().getIp4Address(), inf.mac());
+                }
+                else {
+                    macTable6.put(ip.ipAddress().getIp6Address(), inf.mac());
+                }
+            }
+        }
+        
+
         // add a packet processor to packetService
         packetService.addProcessor(processor, PacketProcessor.director(2));
+        packetService.addProcessor(arpHandler, PacketProcessor.director(2));
+
         
 
         // install a flowrule for packet-in
-        TrafficSelector.Builder selector = DefaultTrafficSelector.builder();
-        selector.matchEthType(Ethernet.TYPE_ARP);
-        packetService.requestPackets(selector.build(), PacketPriority.REACTIVE, appId);
+        // TrafficSelector.Builder selector = DefaultTrafficSelector.builder();
+        // selector.matchEthType(Ethernet.TYPE_ARP);
+        // packetService.requestPackets(selector.build(), PacketPriority.REACTIVE, appId);
 
         TrafficSelector.Builder selector2 = DefaultTrafficSelector.builder();
         selector2.matchEthType(Ethernet.TYPE_IPV6);
@@ -199,15 +256,15 @@ public class AppComponent {
 
         // remove flowrule installed by your app
         flowRuleService.removeFlowRulesById(appId);
-
         // remove your packet processor
         packetService.removeProcessor(processor);
+        packetService.removeProcessor(arpHandler);
         processor = null;
 
         // remove flowrule you installed for packet-in
-        TrafficSelector.Builder selector = DefaultTrafficSelector.builder();
-        selector.matchEthType(Ethernet.TYPE_ARP);
-        packetService.cancelPackets(selector.build(), PacketPriority.REACTIVE, appId);
+        // TrafficSelector.Builder selector = DefaultTrafficSelector.builder();
+        // selector.matchEthType(Ethernet.TYPE_ARP);
+        // packetService.cancelPackets(selector.build(), PacketPriority.REACTIVE, appId);
 
         TrafficSelector.Builder selector2 = DefaultTrafficSelector.builder();
         selector2.matchEthType(Ethernet.TYPE_IPV6);
@@ -311,7 +368,7 @@ public class AppComponent {
                 .selector(selector1.build())
                 .filteredIngressPoint(fsrc)
                 .filteredEgressPoint(fdst)
-                .priority(39999)
+                .priority(40001)
                 .build();
 
             PointToPointIntent intent2 = PointToPointIntent.builder()
@@ -320,7 +377,7 @@ public class AppComponent {
                 .selector(selector2.build())
                 .filteredIngressPoint(fdst)
                 .filteredEgressPoint(fsrc)
-                .priority(39999)
+                .priority(40001)
                 .build();
 
             intentService.submit(intent1);
@@ -352,7 +409,7 @@ public class AppComponent {
                 .selector(selector1.build())
                 .filteredIngressPoint(fsrc)
                 .filteredEgressPoint(fdst)
-                .priority(39999)
+                .priority(40001)
                 .build();
 
             PointToPointIntent intent2 = PointToPointIntent.builder()
@@ -361,12 +418,88 @@ public class AppComponent {
                 .selector(selector2.build())
                 .filteredIngressPoint(fdst)
                 .filteredEgressPoint(fsrc)
-                .priority(39999)
+                .priority(40001)
                 .build();
 
             intentService.submit(intent1);
             intentService.submit(intent2);
             
+        }
+    }
+
+    
+    private class ProxyArpHandler implements PacketProcessor {
+        @Override
+        public void process(PacketContext context) {
+            if (context.isHandled()) {
+                return;
+            }
+
+            InboundPacket pkt = context.inPacket();
+            Ethernet ethPkt = pkt.parsed();
+
+            if (ethPkt.getEtherType() != Ethernet.TYPE_ARP) {
+                return;
+            }
+
+            ARP arpPkt = (ARP) ethPkt.getPayload();
+
+            if (arpPkt.getProtocolType() != ARP.PROTO_TYPE_IP) {
+                return;
+            }
+
+            Ip4Address dstIp = Ip4Address.valueOf(arpPkt.getTargetProtocolAddress());
+            Ip4Address srcIp = Ip4Address.valueOf(arpPkt.getSenderProtocolAddress());
+            MacAddress srcMac = ethPkt.getSourceMAC();
+            ConnectPoint inPort = pkt.receivedFrom();
+
+
+            if (arpTable.get(srcIp) == null) {
+                arpTable.put(srcIp, srcMac);
+            }
+            if (portTable.get(srcMac) == null) {
+                portTable.put(srcMac, inPort);
+            }
+
+            MacAddress dstMac = arpTable.get(dstIp);
+            ConnectPoint outPort = portTable.get(dstMac);
+
+            if (arpPkt.getOpCode() == ARP.OP_REQUEST) {
+                if (dstMac == null) {
+                    log.info("TABLE MISS. Send request to edge ports");
+                    flood(ethPkt, inPort);
+                } else {
+                    log.info("TABLE HIT. Requested MAC = {}", dstMac);
+                    sendArpReply(ethPkt, dstIp, dstMac, inPort);
+                }
+            } else if (arpPkt.getOpCode() == ARP.OP_REPLY) {
+                log.info("RECV REPLY. Requested MAC = {}", srcMac);
+                sendPacket(ethPkt, outPort);
+            }
+        }
+
+        private void flood(Ethernet ethPkt, ConnectPoint inPort) {
+            for (ConnectPoint cp : edgePortService.getEdgePoints()) {
+                if (!cp.equals(inPort)) {
+                    sendPacket(ethPkt, cp);
+                }
+            }
+        }
+
+        private void sendArpReply(Ethernet ethPkt, Ip4Address dstIp,
+         MacAddress dstMac, ConnectPoint inPort) {
+
+            Ethernet arpReply = ARP.buildArpReply(dstIp, dstMac, ethPkt);
+            sendPacket(arpReply, inPort);
+        }
+
+        private void sendPacket(Ethernet ethPkt, ConnectPoint cp) {
+
+            TrafficTreatment treatment = DefaultTrafficTreatment.builder().setOutput(cp.port()).build();
+            OutboundPacket outPacket = new DefaultOutboundPacket(cp.deviceId(), treatment,
+                ByteBuffer.wrap(ethPkt.serialize()));
+
+            packetService.emit(outPacket);
         }
     }
 
@@ -379,14 +512,18 @@ public class AppComponent {
             if (context.isHandled()) {
                 return;
             }
-            NameConfig config = cfgService.getConfig(appId, NameConfig.class);
-            if (!BGPintent && config != null) {
+            
+            
 
-                installBGPIntents(config);
-                BGPintent = true;
-                log.info("BGP intents installed");
-            }
+            // Collection<RouteInfo> routes6 = routeService.getRoutes(new RouteTableId("ipv6"));
+            // for (RouteInfo route : routes6) {
+            //     for (ResolvedRoute resRoute : route.allRoutes()) {
+            //         routeTable6.put(resRoute.prefix().getIp6Prefix(), resRoute.nextHop().getIp6Address());
+            //     }
+            // }
 
+
+            
             InboundPacket pkt = context.inPacket();
             Ethernet ethPkt = pkt.parsed();
             PortNumber recPort = pkt.receivedFrom().port();
@@ -408,40 +545,43 @@ public class AppComponent {
             }
 
             // ARP packet
-            else if ( ethType == Ethernet.TYPE_ARP) {
-                ARP arpPacket = (ARP) ethPkt.getPayload();
+            // else if ( ethType == Ethernet.TYPE_ARP) {
+            //     ARP arpPacket = (ARP) ethPkt.getPayload();
 
-                // get payload
-                Ip4Address srcIp = Ip4Address.valueOf(arpPacket.getSenderProtocolAddress());
-                MacAddress srcMac = MacAddress.valueOf(arpPacket.getSenderHardwareAddress());
-                Ip4Address dstIp = Ip4Address.valueOf(arpPacket.getTargetProtocolAddress());
+            //     // get payload
+            //     Ip4Address srcIp = Ip4Address.valueOf(arpPacket.getSenderProtocolAddress());
+            //     MacAddress srcMac = MacAddress.valueOf(arpPacket.getSenderHardwareAddress());
+            //     Ip4Address dstIp = Ip4Address.valueOf(arpPacket.getTargetProtocolAddress());
 
                     
-                // if it is a request packet
-                if (arpPacket.getOpCode() == ARP.OP_REQUEST){
+            //     // if it is a request packet
+            //     if (arpPacket.getOpCode() == ARP.OP_REQUEST){
 
-                    // write the srcIP if it is not written
-                    if (macTable.get(srcIp) == null) {
-                        macTable.put(srcIp, srcMac);
-                        log.info("Add new entry. IP = {}, MAC = {}", srcIp, srcMac);
-                    }
+            //         // write the srcIP if it is not written
+            //         if (macTable.get(srcIp) == null) {
+            //             macTable.put(srcIp, srcMac);
+            //             log.info("Add new entry from request. IP = {}, MAC = {}", srcIp, srcMac);
+            //         }
 
-                    if (macTable.get(dstIp) == null){
-                        log.info("TABLE MISS on IP = {}", dstIp);
-                        flood_to_all(ethPkt, recDevId, recPort);
-                    } else {
-                        log.info("TABLE HIT. Requested MAC = {}", macTable.get(dstIp));
-                        controller_reply(ethPkt, dstIp, macTable.get(dstIp), recDevId, recPort);
-                    }
-                }
-                else if (arpPacket.getOpCode() == ARP.OP_REPLY) {
-                    macTable.put(srcIp, srcMac);
-                    log.info("Add new entry. IP = {}, MAC = {}", srcIp, srcMac);
+            //         if (macTable.get(dstIp) == null){
+            //             log.info("TABLE MISS on IP = {}", dstIp);
+            //             flood_to_all(ethPkt, recDevId, recPort);
+            //         } else {
+            //             log.info("TABLE HIT. Requested MAC = {}", macTable.get(dstIp));
+            //             controller_reply(ethPkt, dstIp, macTable.get(dstIp), recDevId, recPort);
+            //         }
+            //     }
+            //     else if (arpPacket.getOpCode() == ARP.OP_REPLY) {
+            //         if (macTable.get(srcIp) == null) {
+            //             macTable.put(srcIp, srcMac);
+            //             log.info("Add new entry from request. IP = {}, MAC = {}", srcIp, srcMac);
+            //         }
+            //         log.info("Add new entry from reply. IP = {}, MAC = {}", srcIp, srcMac);
 
-                }
-                context.block();
-                return;
-            }
+            //     }
+            //     context.block();
+            //     return;
+            // }
 
             if (ethType == Ethernet.TYPE_IPV4) {
                 MacAddress srcMac = ethPkt.getSourceMAC();
@@ -452,19 +592,23 @@ public class AppComponent {
                     bridgeTable.put(recDevId, new HashMap<>());
                 }
 
-                if (bridgeTable.get(recDevId).get(Pair.of(srcMac, srcIp)) == null) {
-                    // the mapping of pkt's src mac and receivedfrom port wasn't store in the table of the rec device
-                    log.info("Add an entry to the port table of `{}`. MAC address: `{}`, IPv4 Address: `{}` => Port: `{}`.",
-                            recDevId, srcMac, srcIp, recPort);
-                    bridgeTable.get(recDevId).put(Pair.of(srcMac, srcIp), recPort);
-                }
+
+                bridgeTable.get(recDevId).put(Pair.of(srcMac, srcIp), recPort);
+                // if (oldPort != null){
+                //     log.info("port of {} {} changed from {} to {} in {}", srcMac, srcIp, oldPort, recPort, recDevId);
+                // }
+                // if (bridgeTable.get(recDevId).get(Pair.of(srcMac, srcIp)) == null) {
+                //     // the mapping of pkt's src mac and receivedfrom port wasn't store in the table of the rec device
+                //     log.info("Add an entry to the port table of `{}`. MAC address: `{}`, IPv4 Address: `{}` => Port: `{}`.",
+                //             recDevId, srcMac, srcIp, recPort);
+                //     bridgeTable.get(recDevId).put(Pair.of(srcMac, srcIp), recPort);
+                // }
 
                 if (bridgeTable.get(recDevId).get(Pair.of(dstMac, dstIp)) == null) {
                     // the mapping of dst mac and forwarding port wasn't store in the table of the rec device
                     flood(context, dstMac, recDevId);
-    
                 } 
-                else if (bridgeTable.get(recDevId).get(Pair.of(dstMac, dstIp)) != null) {
+                else {
                     // there is a entry store the mapping of dst mac and forwarding port
                     installRule(context, srcMac, dstMac, srcIp, dstIp, recDevId, bridgeTable.get(recDevId).get(Pair.of(dstMac, dstIp)));
                     packetOut(context, bridgeTable.get(recDevId).get(Pair.of(dstMac, dstIp)));
@@ -484,7 +628,7 @@ public class AppComponent {
 
                 if (bridgeTable6.get(recDevId).get(Pair.of(srcMac, srcIp)) == null) {
                     // the mapping of pkt's src mac and receivedfrom port wasn't store in the table of the rec device
-                    log.info("Add an entry to the port table of `{}`. MAC address: `{}`, IPv4 Address: `{}` => Port: `{}`.",
+                    log.info("Add an entry to the port table of `{}`. MAC address: `{}`, IPv6 Address: `{}` => Port: `{}`.",
                             recDevId, srcMac, srcIp, recPort);
                     bridgeTable6.get(recDevId).put(Pair.of(srcMac, srcIp), recPort);
                 }
@@ -567,10 +711,158 @@ public class AppComponent {
         context.send();
     }
 
+    private MacAddress getPeerMac(Ip4Address IP) {
+        // find peer's ipv4 address
+        NameConfig config = cfgService.getConfig(appId, NameConfig.class);
+        List<String> v4Peers = config.v4Peers();
+
+        for (int i = 0; i < v4Peers.size(); i+=2) {
+            if (IP.toString().equals(v4Peers.get(i))) {
+                return arpTable.get(Ip4Address.valueOf(v4Peers.get(i+1)));
+            }
+            else if (IP.toString().equals(v4Peers.get(i+1))) {
+                return arpTable.get(Ip4Address.valueOf(v4Peers.get(i)));
+            }
+        }
+        return null;
+    }
+
+    private void installMacChanging(Ip4Prefix srcIp, Ip4Prefix dstIp, MacAddress srcMac, MacAddress dstMac, ConnectPoint srcCP, ConnectPoint dstCP) {
+        TrafficSelector.Builder selectorBuilder = DefaultTrafficSelector.builder()
+            .matchEthType(Ethernet.TYPE_IPV4)
+            .matchIPDst(dstIp)
+            .matchIPSrc(srcIp);
+
+        TrafficTreatment treatment = DefaultTrafficTreatment.builder()
+            .setEthSrc(srcMac)
+            .setEthDst(dstMac)
+            .build();
+
+        FilteredConnectPoint fsrc = new FilteredConnectPoint(dstCP);
+        FilteredConnectPoint fdst = new FilteredConnectPoint(srcCP);
+
+        PointToPointIntent intent = PointToPointIntent.builder()
+            .appId(appId)
+            .key(Key.of(srcIp.toString() + "-" + dstIp.toString(), appId))
+            .selector(selectorBuilder.build())
+            .filteredIngressPoint(fsrc)
+            .filteredEgressPoint(fdst)
+            .priority(39999)
+            .treatment(treatment)
+            .build();
+
+        intentService.submit(intent);
+    }
+
+    private ConnectPoint getIpConnectPoint(Ip4Address ip) {
+        for (Host host : hostService.getHostsByIp(ip)) {
+            return host.location();
+        }
+        return null;
+    }
+
+    private Boolean buildMacChange(MacAddress srcMac, MacAddress dstMac, Ip4Address srcIp, Ip4Address dstIp, DeviceId recDevId) {
+        NameConfig config = cfgService.getConfig(appId, NameConfig.class);
+
+        Collection<RouteInfo> routes = routeService.getRoutes(new RouteTableId("ipv4"));
+        routeTable.clear();
+        for (RouteInfo route : routes) {
+            for (ResolvedRoute resRoute : route.allRoutes()) {
+                routeTable.put(resRoute.prefix().getIp4Prefix(), resRoute.nextHop().getIp4Address());
+            }
+        }
+
+        Boolean ipFromOther = false, ipToOther = false;
+        Ip4Address srcIpOther = null, dstIpOther = null;
+        Ip4Prefix srcPrefixOther = null, dstPrefixOther = null;
+
+        // if (ipFromOther) {
+        //     log.info("IP from other: {}", srcIpOther);
+        //     log.info("Real dst IP = {}", srcIp);
+        // }
+
+        // if (ipToOther) {
+        //     log.info("IP to other: {}", dstIpOther);
+        //     log.info("Real dst IP = {}", dstIp);
+        // }
+
+        // check if ip from/to other
+        for (Map.Entry<Ip4Prefix, Ip4Address> entry: routeTable.entrySet()){
+            Ip4Prefix prefix = entry.getKey();
+            log.info("Prefix: {}", prefix);
+            if (prefix.contains(srcIp)) {
+                ipFromOther = true;
+                log.info("src IP: {}", srcIp);
+                srcIpOther = entry.getValue();
+                srcPrefixOther = prefix;
+            }
+            if (prefix.contains(dstIp)) {
+                ipToOther = true;
+                log.info("dst IP: {}", dstIp);
+                dstIpOther = entry.getValue();
+                dstPrefixOther = prefix;
+            }
+        }
+
+        if (ipFromOther) {
+            if (ipToOther) {
+                // cross domain
+                MacAddress newSrcMac = getPeerMac(dstIpOther);
+                MacAddress newDstMac = arpTable.get(dstIpOther);
+
+                ConnectPoint srcCP = getIpConnectPoint(srcIpOther);
+                ConnectPoint dstCP = getIpConnectPoint(dstIpOther);
+
+                if (srcCP == null || dstCP == null) {
+                    return false;
+                }
+
+                installMacChanging(srcPrefixOther, dstPrefixOther, newSrcMac, newDstMac, srcCP, dstCP);
+            }
+            else {
+                // other -> local
+                MacAddress newSrcMac = MacAddress.valueOf(config.gatewayMac());
+                MacAddress newDstMac = arpTable.get(dstIp);
+                if (newDstMac == null){
+                    return false;
+                }
+                ConnectPoint srcCP = getIpConnectPoint(srcIpOther);
+                ConnectPoint dstCP = getIpConnectPoint(dstIp);
+
+                if (srcCP == null || dstCP == null) {
+                    return false;
+                }
+                
+                installMacChanging(srcPrefixOther, dstIp.toIpPrefix().getIp4Prefix(), newSrcMac, newDstMac, srcCP, dstCP);
+            }
+            return true;
+        }
+        else {
+            if (ipToOther) {
+                // local -> other
+                MacAddress newSrcMac = getPeerMac(dstIpOther);
+                MacAddress newDstMac = arpTable.get(dstIpOther);
+                
+                ConnectPoint srcCP = getIpConnectPoint(srcIp);
+                ConnectPoint dstCP = getIpConnectPoint(dstIpOther);
+
+                if (srcCP == null || dstCP == null) {
+                    return false;
+                }
+
+                installMacChanging(srcIp.toIpPrefix().getIp4Prefix(), dstPrefixOther, newSrcMac, newDstMac, srcCP, dstCP);
+                return true;
+            }
+        }
+        return false;
+    }
+
+
     private void installRule(PacketContext context, MacAddress srcMac, MacAddress dstMac, Ip4Address srcIp, Ip4Address dstIp,
                              DeviceId recDevId, PortNumber outPort) {
         log.info("MAC address `{}` is matched on `{}`. Install a flow rule.", dstMac, recDevId);
 
+        buildMacChange(srcMac, dstMac, srcIp, dstIp, recDevId);
         TrafficSelector.Builder selectorBuilder = DefaultTrafficSelector.builder()
                     .matchEthType(Ethernet.TYPE_IPV4)
                     .matchEthDst(dstMac)

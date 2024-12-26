@@ -287,6 +287,7 @@ temp=$(docker inspect -f '{{.State.Pid}}' $(docker ps -aqf "name=$ROUTER1Name"))
 ip link set vethtoonos netns $temp
 ip netns exec $temp ip addr add 192.168.100.3/24 dev vethtoonos
 ip netns exec $temp ip link set vethtoonos up
+echo "find gatesy?"
 ip netns exec $temp route add default gw 192.168.100.1/24
 
 ####
