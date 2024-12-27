@@ -241,7 +241,7 @@ public class AppComponent {
 
         // add a packet processor to packetService
         packetService.addProcessor(processor, PacketProcessor.director(2));
-        packetService.addProcessor(arpHandler, PacketProcessor.director(2));
+        packetService.addProcessor(arpHandler, PacketProcessor.director(3));
 
         
 
