@@ -381,8 +381,11 @@ public class AppComponent {
             if (i == 2){
                 port = PortNumber.portNumber("3");
             }
-            else {
+            else if (i==3) {
                 port = PortNumber.portNumber("2");
+            }
+            else {
+                port = PortNumber.portNumber("4");
             }
             ConnectPoint src = new ConnectPoint(devID, port);
             ConnectPoint dst = interfaceService.getMatchingInterface(IpAddress.valueOf(v4Peers.get(i))).connectPoint();
@@ -471,6 +474,7 @@ public class AppComponent {
             if (context.isHandled()) {
                 return;
             }
+            log.info("In ProxyArpHandler");
 
             InboundPacket pkt = context.inPacket();
             Ethernet ethPkt = pkt.parsed();

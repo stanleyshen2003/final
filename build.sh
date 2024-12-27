@@ -290,6 +290,8 @@ echo "Adding bond to ovs"
 build_ovs_router_path_custom $OVS1Name $ROUTER1Name 0 "172.16.${ID}.69/24" "2a0b:4e07:c4:${ID}::69/64" "00:00:00:00:00:01"
 build_ovs_router_path_custom $OVS1Name $ROUTER1Name 1 "192.168.70.${ID}/24" "fd70::${ID}/64" "00:00:00:00:00:02"
 build_ovs_router_path_custom $OVS1Name $ROUTER1Name 2 "192.168.63.1/24" "fd63::1/64" "00:00:00:00:00:03"
+#$ADD
+build_ovs_router_path_custom $OVS1Name $ROUTER1Name 3 "192.168.27.1/24" "fd27::1/64" "00:00:00:00:00:06"
 
 ####
 echo "Add 192.168.100.3 to router 1 and connect to vethonos"
@@ -335,6 +337,9 @@ echo "Configuring router2 to TA's router"
 ip route add 10.0.0.0/24 dev wg0
 
 ovs-vsctl add-port $OVS2Name vxlan0 -- set interface vxlan0 type=vxlan options:remote_ip=192.168.60.53 options:dst_port=4789
+#$ADD
+ovs-vsctl add-port $OVS2Name vxlan1 -- set interface vxlan1 type=vxlan options:remote_ip=192.168.61.52 options:dst_port=4789
+
 ip link add veth2onos type veth peer name veth2onospeer
 ip link set veth2onos mtu 3000
 ip link set veth2onospeer mtu 3000
@@ -344,6 +349,8 @@ ip addr flush dev veth2onos
 ip addr flush dev veth2onospeer
 ip link set veth2onos master vethonos
 ovs-vsctl add-port $OVS2Name veth2onospeer
+
+
 
 
 docker exec r2 sysctl -w net.ipv6.conf.all.forwarding=1
