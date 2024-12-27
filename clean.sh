@@ -16,7 +16,7 @@ done
 
 ovs-vsctl del-br br1
 ovs-vsctl del-br br2
-ip link delete bond0 type bond
+# ip link delete bond0 type bond
 
 wg-quick down wg0
 

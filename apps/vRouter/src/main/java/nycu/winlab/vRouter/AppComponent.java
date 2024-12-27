@@ -341,8 +341,8 @@ public class AppComponent {
         List<String> v4Peers = config.v4Peers();
         List<String> v6Peers = config.v6Peers();
         String devicePort = config.vrrouting();
-        DeviceId devID = DeviceId.deviceId(devicePort.split("/")[0]);
-        PortNumber port = PortNumber.portNumber(devicePort.split("/")[1]);
+        // DeviceId devID = DeviceId.deviceId(devicePort.split("/")[0]);
+        // PortNumber port = PortNumber.portNumber(devicePort.split("/")[1]);
         
         for (int i = 0; i < v4Peers.size(); i+=2) {
             Ip4Address peerIP1 = Ip4Address.valueOf(v4Peers.get(i));
@@ -354,7 +354,7 @@ public class AppComponent {
             TrafficSelector.Builder selector2 = DefaultTrafficSelector.builder();
             selector2.matchIPSrc(peerIP2.toIpPrefix()).matchIPDst(peerIP1.toIpPrefix()).matchEthType(Ethernet.TYPE_IPV4);
             
-            ConnectPoint src = new ConnectPoint(devID, port);
+            ConnectPoint src = getIpConnectPoint(Ip4Address.valueOf(v4Peers.get(i)));
             ConnectPoint dst = interfaceService.getMatchingInterface(IpAddress.valueOf(v4Peers.get(i))).connectPoint();
 
             log.info("Created intent from {}/{} to {}/{}", src.deviceId(), src.port(), dst.deviceId(), dst.port());

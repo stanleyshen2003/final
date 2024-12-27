@@ -114,7 +114,10 @@ function build_ovs_router_path_custom {
     create_veth_pair $ovs_inf $container_inf
     ovs-vsctl add-port $1 $ovs_inf
     set_intf_container $2 $container_inf $4
-    set_v6intf_container $2 $container_inf $5
+    if [ $# -ge 5 ]
+    then
+        set_v6intf_container $2 $container_inf $5
+    fi
 }
 
 # Connects a container to an ovsswitch
@@ -253,25 +256,28 @@ ovs-vsctl set interface $OVS1Name mtu_request=3000
 
 
 ####
-echo "Connect router1 to ovs1"
-ip link add $BONDName type bond
-ip link set $BONDName mtu 3000
-ip link set $BONDName up
-ip addr flush dev $BONDName
+# echo "Connect router1 to ovs1"
+# ip link add $BONDName type bond
+# ip link set $BONDName mtu 3000
+# ip link set $BONDName up
+# ip addr flush dev $BONDName
 
-echo "Adding veth pairs for bond"
-create_veth_pair_for_bond $ROUTER1Name $OVS1Name 0 $BONDName
-create_veth_pair_for_bond $ROUTER1Name $OVS1Name 1 $BONDName
-create_veth_pair_for_bond $ROUTER1Name $OVS1Name 2 $BONDName
+# echo "Adding veth pairs for bond"
+# create_veth_pair_for_bond $ROUTER1Name $OVS1Name 0 $BONDName
+# create_veth_pair_for_bond $ROUTER1Name $OVS1Name 1 $BONDName
+# create_veth_pair_for_bond $ROUTER1Name $OVS1Name 2 $BONDName
 
 echo "Adding bond to ovs"
-ovs-vsctl add-port $OVS1Name bond0
-set_intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}0" "172.16.${ID}.69/24"
-set_v6intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}0" "2a0b:4e07:c4:${ID}::69/64"
-set_intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}1" "192.168.70.${ID}/24"
-set_v6intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}1" "fd70::${ID}/64"
-set_intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}2" "192.168.63.1/24"
-set_v6intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}2" "fd63::1/64"
+# ovs-vsctl add-port $OVS1Name bond0
+# set_intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}0" "172.16.${ID}.69/24"
+# set_v6intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}0" "2a0b:4e07:c4:${ID}::69/64"
+# set_intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}1" "192.168.70.${ID}/24"
+# set_v6intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}1" "fd70::${ID}/64"
+# set_intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}2" "192.168.63.1/24"
+# set_v6intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}2" "fd63::1/64"
+build_ovs_router_path_custom $OVS1Name $ROUTER1Name 0 "172.16.${ID}.69/24" "2a0b:4e07:c4:${ID}::69/64"
+build_ovs_router_path_custom $OVS1Name $ROUTER1Name 1 "192.168.70.${ID}/24" "fd70::${ID}/64"
+build_ovs_router_path_custom $OVS1Name $ROUTER1Name 2 "192.168.63.1/24" "fd63::1/64"
 
 ####
 echo "Add 192.168.100.3 to router 1 and connect to vethonos"
