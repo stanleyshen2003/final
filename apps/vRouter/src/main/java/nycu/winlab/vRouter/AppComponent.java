@@ -230,12 +230,12 @@ public class AppComponent {
 
                 log.info("************");
         // log.info("I want to /find srcip:{} dstip:{}", srcIp, dstIp);
-        log.info("Travel macTable6");
-        for (Map.Entry<Ip6Address, MacAddress> entry : macTable6.entrySet()) {
-            Ip6Prefix prefix = entry.getKey();
-            Ip6Address nextHop = entry.getValue();
-            log.info("ip6: {}, macA: {}", prefix, nextHop);
-        }
+        // log.info("Travel macTable6");
+        // for (Map.Entry<Ip6Address, MacAddress> entry : macTable6.entrySet()) {
+        //     Ip6Prefix prefix = entry.getKey();
+        //     Ip6Address nextHop = entry.getValue();
+        //     log.info("ip6: {}, macA: {}", prefix, nextHop);
+        // }
         log.info("************");
         
 
@@ -249,6 +249,7 @@ public class AppComponent {
         // TrafficSelector.Builder selector = DefaultTrafficSelector.builder();
         // selector.matchEthType(Ethernet.TYPE_ARP);
         // packetService.requestPackets(selector.build(), PacketPriority.REACTIVE, appId);
+
 
         TrafficSelector.Builder selector2 = DefaultTrafficSelector.builder();
         selector2.matchEthType(Ethernet.TYPE_IPV6);
@@ -354,7 +355,7 @@ public class AppComponent {
         List<String> v6Peers = config.v6Peers();
         String devicePort = config.vrrouting();
         DeviceId devID = DeviceId.deviceId(devicePort.split("/")[0]);
-        PortNumber port = PortNumber.portNumber(devicePort.split("/")[1]);
+        PortNumber port; // = PortNumber.portNumber(devicePort.split("/")[1]);
         
         for (int i = 0; i < v4Peers.size(); i+=2) {
             Ip4Address peerIP1 = Ip4Address.valueOf(v4Peers.get(i));
@@ -366,6 +367,12 @@ public class AppComponent {
             TrafficSelector.Builder selector2 = DefaultTrafficSelector.builder();
             selector2.matchIPSrc(peerIP2.toIpPrefix()).matchIPDst(peerIP1.toIpPrefix()).matchEthType(Ethernet.TYPE_IPV4);
             
+            if (i == 2){
+                port = PortNumber.portNumber("3");
+            }
+            else {
+                port = PortNumber.portNumber("2");
+            }
             ConnectPoint src = new ConnectPoint(devID, port);
             ConnectPoint dst = interfaceService.getMatchingInterface(IpAddress.valueOf(v4Peers.get(i))).connectPoint();
 
@@ -407,7 +414,14 @@ public class AppComponent {
             TrafficSelector.Builder selector2 = DefaultTrafficSelector.builder();
             selector2.matchEthType(Ethernet.TYPE_IPV6).matchIPv6Src(peerIP2.toIpPrefix());
             
+            if (i == 2){
+                port = PortNumber.portNumber("3");
+            }
+            else {
+                port = PortNumber.portNumber("2");
+            }
             ConnectPoint src = new ConnectPoint(devID, port);
+            
             ConnectPoint dst = interfaceService.getMatchingInterface(IpAddress.valueOf(v6Peers.get(i))).connectPoint();
 
             log.info("Created intent from {}/{} to {}/{}", src.deviceId(), src.port(), dst.deviceId(), dst.port());
@@ -791,7 +805,7 @@ public class AppComponent {
             .selector(selectorBuilder.build())
             .filteredIngressPoint(fsrc)
             .filteredEgressPoint(fdst)
-            .priority(39999)
+            .priority(39998)
             .treatment(treatment)
             .build();
 
@@ -818,7 +832,7 @@ public class AppComponent {
             .selector(selectorBuilder.build())
             .filteredIngressPoint(fsrc)
             .filteredEgressPoint(fdst)
-            .priority(39999)
+            .priority(39998)
             .treatment(treatment)
             .build();
 
