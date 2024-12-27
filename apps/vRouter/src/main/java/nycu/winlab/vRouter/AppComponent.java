@@ -199,7 +199,27 @@ public class AppComponent {
     }
 
     
+    private void refreshTable() {
+        NameConfig config = cfgService.getConfig(appId, NameConfig.class);
 
+        for (Interface inf : interfaceService.getInterfaces()) {
+            for (InterfaceIpAddress ip : inf.ipAddressesList()) {
+                if (ip.ipAddress().isIp4()) {
+                    arpTable.put(ip.ipAddress().getIp4Address(), inf.mac());
+                    log.info("write ip4: {}, mac: {}", ip.ipAddress().getIp4Address(), inf.mac());
+                }
+                else {
+                    macTable6.put(ip.ipAddress().getIp6Address(), inf.mac());
+                    log.info("write ip6: {}, mac: {}", ip.ipAddress().getIp6Address(), inf.mac());
+                }
+            }
+        }
+
+        arpTable.put(Ip4Address.valueOf(config.gatewayIp4()), MacAddress.valueOf(config.gatewayMac()));
+        log.info("write ip4: {}, mac: {}", config.gatewayIp4(), config.gatewayMac());
+        macTable6.put(Ip6Address.valueOf(config.gatewayIp6()), MacAddress.valueOf(config.gatewayMac()));
+        log.info("write ip6: {}, mac: {}", config.gatewayIp6(), config.gatewayMac());
+    }
     
 
     @Activate
@@ -217,16 +237,7 @@ public class AppComponent {
         NameConfig config = cfgService.getConfig(appId, NameConfig.class);
         installBGPIntents(config);
 
-        for (Interface inf : interfaceService.getInterfaces()) {
-            for (InterfaceIpAddress ip : inf.ipAddressesList()) {
-                if (ip.ipAddress().isIp4()) {
-                    arpTable.put(ip.ipAddress().getIp4Address(), inf.mac());
-                }
-                else {
-                    macTable6.put(ip.ipAddress().getIp6Address(), inf.mac());
-                }
-            }
-        }
+        refreshTable();
 
                 log.info("************");
         // log.info("I want to /find srcip:{} dstip:{}", srcIp, dstIp);
@@ -275,9 +286,9 @@ public class AppComponent {
         processor = null;
 
         // remove flowrule you installed for packet-in
-        // TrafficSelector.Builder selector = DefaultTrafficSelector.builder();
-        // selector.matchEthType(Ethernet.TYPE_ARP);
-        // packetService.cancelPackets(selector.build(), PacketPriority.REACTIVE, appId);
+        TrafficSelector.Builder selector = DefaultTrafficSelector.builder();
+        selector.matchEthType(Ethernet.TYPE_ARP);
+        packetService.cancelPackets(selector.build(), PacketPriority.REACTIVE, appId);
 
         TrafficSelector.Builder selector2 = DefaultTrafficSelector.builder();
         selector2.matchEthType(Ethernet.TYPE_IPV6);
@@ -387,7 +398,7 @@ public class AppComponent {
                 .selector(selector1.build())
                 .filteredIngressPoint(fsrc)
                 .filteredEgressPoint(fdst)
-                .priority(40001)
+                .priority(39999)
                 .build();
 
             PointToPointIntent intent2 = PointToPointIntent.builder()
@@ -396,7 +407,7 @@ public class AppComponent {
                 .selector(selector2.build())
                 .filteredIngressPoint(fdst)
                 .filteredEgressPoint(fsrc)
-                .priority(40001)
+                .priority(39999)
                 .build();
 
             intentService.submit(intent1);
@@ -435,7 +446,7 @@ public class AppComponent {
                 .selector(selector1.build())
                 .filteredIngressPoint(fsrc)
                 .filteredEgressPoint(fdst)
-                .priority(40001)
+                .priority(39999)
                 .build();
 
             PointToPointIntent intent2 = PointToPointIntent.builder()
@@ -444,7 +455,7 @@ public class AppComponent {
                 .selector(selector2.build())
                 .filteredIngressPoint(fdst)
                 .filteredEgressPoint(fsrc)
-                .priority(40001)
+                .priority(39999)
                 .build();
 
             intentService.submit(intent1);
@@ -468,6 +479,8 @@ public class AppComponent {
                 return;
             }
 
+            refreshTable();
+
             ARP arpPkt = (ARP) ethPkt.getPayload();
 
             if (arpPkt.getProtocolType() != ARP.PROTO_TYPE_IP) {
@@ -481,6 +494,7 @@ public class AppComponent {
 
 
             if (arpTable.get(srcIp) == null) {
+                log.info("in arpprocessof, add new entry. IP = {}, MAC = {}", srcIp, srcMac);
                 arpTable.put(srcIp, srcMac);
             }
             if (portTable.get(srcMac) == null) {
@@ -538,6 +552,7 @@ public class AppComponent {
             if (context.isHandled()) {
                 return;
             }
+            
             
             
 
@@ -632,6 +647,12 @@ public class AppComponent {
                 //     bridgeTable.get(recDevId).put(Pair.of(srcMac, srcIp), recPort);
                 // }
 
+                Boolean installed = buildMacChange(srcMac, dstMac, srcIp, dstIp, recDevId, recPort);
+
+                if (installed) {
+                    context.block();
+                    return;
+                }
                 if (bridgeTable.get(recDevId).get(Pair.of(dstMac, dstIp)) == null) {
                     // the mapping of dst mac and forwarding port wasn't store in the table of the rec device
                     flood(context, dstMac, recDevId);
@@ -642,7 +663,6 @@ public class AppComponent {
                     packetOut(context, bridgeTable.get(recDevId).get(Pair.of(dstMac, dstIp)));
                 }
 
-                buildMacChange(srcMac, dstMac, srcIp, dstIp, recDevId);
 
 
                 context.block();
@@ -775,10 +795,10 @@ public class AppComponent {
         List<String> v6Peers = config.v6Peers();
 
         for (int i = 0; i < v6Peers.size(); i+=2) {
-            if (IP.toString().equals(v6Peers.get(i))) {
+            if (interfaceService.getMatchingInterface(IP).equals(interfaceService.getMatchingInterface(IpAddress.valueOf(v6Peers.get(i))))) {
                 return macTable6.get(Ip6Address.valueOf(v6Peers.get(i+1)));
             }
-            else if (IP.toString().equals(v6Peers.get(i+1))) {
+            else if (interfaceService.getMatchingInterface(IP).equals(interfaceService.getMatchingInterface(IpAddress.valueOf(v6Peers.get(i+1))))) {
                 return macTable6.get(Ip6Address.valueOf(v6Peers.get(i)));
             }
         }
@@ -796,8 +816,8 @@ public class AppComponent {
             .setEthDst(dstMac)
             .build();
 
-        FilteredConnectPoint fsrc = new FilteredConnectPoint(dstCP);
-        FilteredConnectPoint fdst = new FilteredConnectPoint(srcCP);
+        FilteredConnectPoint fsrc = new FilteredConnectPoint(srcCP);
+        FilteredConnectPoint fdst = new FilteredConnectPoint(dstCP);
 
         PointToPointIntent intent = PointToPointIntent.builder()
             .appId(appId)
@@ -815,16 +835,16 @@ public class AppComponent {
     private void installMac6Changing(Ip6Prefix srcIp, Ip6Prefix dstIp, MacAddress srcMac, MacAddress dstMac, ConnectPoint srcCP, ConnectPoint dstCP) {
         TrafficSelector.Builder selectorBuilder = DefaultTrafficSelector.builder()
             .matchEthType(Ethernet.TYPE_IPV6)
-            .matchIPDst(dstIp)
-            .matchIPSrc(srcIp);
+            .matchIPv6Dst(dstIp)
+            .matchIPv6Src(srcIp);
 
         TrafficTreatment treatment = DefaultTrafficTreatment.builder()
             .setEthSrc(srcMac)
             .setEthDst(dstMac)
             .build();
 
-        FilteredConnectPoint fsrc = new FilteredConnectPoint(dstCP);
-        FilteredConnectPoint fdst = new FilteredConnectPoint(srcCP);
+        FilteredConnectPoint fsrc = new FilteredConnectPoint(srcCP);
+        FilteredConnectPoint fdst = new FilteredConnectPoint(dstCP);
 
         PointToPointIntent intent = PointToPointIntent.builder()
             .appId(appId)
@@ -854,7 +874,7 @@ public class AppComponent {
         return null;
     }
 
-    private Boolean buildMacChange(MacAddress srcMac, MacAddress dstMac, Ip4Address srcIp, Ip4Address dstIp, DeviceId recDevId) {
+    private Boolean buildMacChange(MacAddress srcMac, MacAddress dstMac, Ip4Address srcIp, Ip4Address dstIp, DeviceId recDevId, PortNumber recPort) {
         NameConfig config = cfgService.getConfig(appId, NameConfig.class);
 
         Collection<RouteInfo> routes = routeService.getRoutes(new RouteTableId("ipv4"));
@@ -903,7 +923,7 @@ public class AppComponent {
                 MacAddress newSrcMac = getPeerMac(dstIpOther);
                 MacAddress newDstMac = arpTable.get(dstIpOther);
 
-                ConnectPoint srcCP = getIpConnectPoint(srcIpOther);
+                ConnectPoint srcCP = new ConnectPoint(recDevId, recPort);
                 ConnectPoint dstCP = getIpConnectPoint(dstIpOther);
 
                 if (srcCP == null || dstCP == null) {
@@ -919,12 +939,18 @@ public class AppComponent {
                 if (newDstMac == null){
                     return false;
                 }
-                ConnectPoint srcCP = getIpConnectPoint(srcIpOther);
+                ConnectPoint srcCP = new ConnectPoint(recDevId, recPort);
                 ConnectPoint dstCP = getIpConnectPoint(dstIp);
 
                 if (srcCP == null || dstCP == null) {
                     return false;
                 }
+                log.info("srcPrefixOther: {}", srcPrefixOther);
+                log.info("dstPrefixOther: {}", dstIp.toIpPrefix().getIp4Prefix());
+                log.info("newSrcMac: {}", newSrcMac);
+                log.info("newDstMac: {}", newDstMac);
+                log.info("srcCP: {}", srcCP);
+                log.info("dstCP: {}", dstCP);
                 
                 installMacChanging(srcPrefixOther, dstIp.toIpPrefix().getIp4Prefix(), newSrcMac, newDstMac, srcCP, dstCP);
             }
@@ -936,7 +962,7 @@ public class AppComponent {
                 MacAddress newSrcMac = getPeerMac(dstIpOther);
                 MacAddress newDstMac = arpTable.get(dstIpOther);
                 
-                ConnectPoint srcCP = getIpConnectPoint(srcIp);
+                ConnectPoint srcCP = new ConnectPoint(recDevId, recPort);
                 ConnectPoint dstCP = getIpConnectPoint(dstIpOther);
 
                 if (srcCP == null || dstCP == null) {
@@ -1010,6 +1036,7 @@ public class AppComponent {
                 // cross domain
                 MacAddress newSrcMac = getPeerMac6(dstIpOther);
                 MacAddress newDstMac = macTable6.get(dstIpOther);
+                // MacAddress newDstMac = macTable6.get(dstIpOther);
 
                 ConnectPoint srcCP = getIp6ConnectPoint(srcIpOther);
                 ConnectPoint dstCP = getIp6ConnectPoint(dstIpOther);
@@ -1018,7 +1045,7 @@ public class AppComponent {
                 log.info("From other but To other: srcCp:{}/dstCp:{}", srcCP, dstCP);
                 log.info("+++++++++++");
 
-                if (srcCP == null || dstCP == null) {
+                if (srcCP == null || dstCP == null || dstIpOther == null) {
                     
                     return false;
                 }
@@ -1042,7 +1069,7 @@ public class AppComponent {
                 log.info("From other but Not to other: srcCp:{}/dstCp:{}", srcCP, dstCP);
                 log.info("+++++++++++");
 
-                if (srcCP == null || dstCP == null) {
+                if (srcCP == null || dstCP == null || newDstMac == null) {
                     return false;
                 }
                 
@@ -1055,6 +1082,7 @@ public class AppComponent {
                 // local -> other
                 MacAddress newSrcMac = getPeerMac6(dstIpOther);
                 MacAddress newDstMac = macTable6.get(dstIpOther);
+                // MacAddress newDstMac = macTable6.get(dstIpOther);
                 
                 ConnectPoint srcCP = getIp6ConnectPoint(srcIp);
                 ConnectPoint dstCP = getIp6ConnectPoint(dstIpOther);
@@ -1062,8 +1090,11 @@ public class AppComponent {
                 log.info("+++++++++++");
                 log.info("Not from other: srcCp:{}/dstCp:{}", srcCP, dstCP);
                 log.info("+++++++++++");
+                log.info("srcIp:{}, dstIp:{}", srcIp, dstIp);
+                log.info("newSrcMac:{}, newDstMac:{}", newSrcMac, newDstMac);
+                log.info("srcCP:{}, dstCP:{}", srcCP, dstCP);
 
-                if (srcCP == null || dstCP == null) {
+                if (srcCP == null || dstCP == null || newDstMac == null) {
                     return false;
                 }
 

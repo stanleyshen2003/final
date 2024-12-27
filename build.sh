@@ -97,27 +97,39 @@ function build_ovs_path {
 }
 
 # Connects a container to an ovsswitch
-# params: ovs container [ipaddress] [gw addr]
+# params: ovs container [ipaddress] [mac addr] [gateway]
 function build_ovs_container_path {
     ovs_inf="veth$1$2"
     container_inf="veth$2$1"
     create_veth_pair $ovs_inf $container_inf
+    if [ $# -ge 4 ]
+    then
+        ifconfig $container_inf hw ether $4
+    fi
     ovs-vsctl add-port $1 $ovs_inf
-    set_intf_container $2 $container_inf $3 $4
+    if [ $# -ge 5 ]
+    then
+        echo $5
+        set_intf_container $2 $container_inf $3 $5
+    else
+        set_intf_container $2 $container_inf $3
+    fi
+    
 }
 
 # Connects a container to an ovsswitch
-# params: ovs container veth_id [ipaddress] [ipv6address]
+# params: ovs container veth_id [ipaddress] [ipv6address] [mac address]
 function build_ovs_router_path_custom {
     ovs_inf="veth$1$2$3"
     container_inf="veth$2$1$3"
     create_veth_pair $ovs_inf $container_inf
+    ifconfig $container_inf hw ether $6
+
     ovs-vsctl add-port $1 $ovs_inf
     set_intf_container $2 $container_inf $4
-    if [ $# -ge 5 ]
-    then
-        set_v6intf_container $2 $container_inf $5
-    fi
+    
+    set_v6intf_container $2 $container_inf $5
+
 }
 
 # Connects a container to an ovsswitch
@@ -275,9 +287,9 @@ echo "Adding bond to ovs"
 # set_v6intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}1" "fd70::${ID}/64"
 # set_intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}2" "192.168.63.1/24"
 # set_v6intf_container $ROUTER1Name "veth${OVS1Name}${ROUTER1Name}2" "fd63::1/64"
-build_ovs_router_path_custom $OVS1Name $ROUTER1Name 0 "172.16.${ID}.69/24" "2a0b:4e07:c4:${ID}::69/64"
-build_ovs_router_path_custom $OVS1Name $ROUTER1Name 1 "192.168.70.${ID}/24" "fd70::${ID}/64"
-build_ovs_router_path_custom $OVS1Name $ROUTER1Name 2 "192.168.63.1/24" "fd63::1/64"
+build_ovs_router_path_custom $OVS1Name $ROUTER1Name 0 "172.16.${ID}.69/24" "2a0b:4e07:c4:${ID}::69/64" "00:00:00:00:00:01"
+build_ovs_router_path_custom $OVS1Name $ROUTER1Name 1 "192.168.70.${ID}/24" "fd70::${ID}/64" "00:00:00:00:00:02"
+build_ovs_router_path_custom $OVS1Name $ROUTER1Name 2 "192.168.63.1/24" "fd63::1/64" "00:00:00:00:00:03"
 
 ####
 echo "Add 192.168.100.3 to router 1 and connect to vethonos"
@@ -300,7 +312,7 @@ ip netns exec $temp route add default gw 192.168.100.1/24
 echo "Connecting two ovs"
 build_ovs_path $OVS1Name $OVS2Name
 echo "Connecting ovs to host"
-build_ovs_container_path $OVS2Name $HOST1Name "172.16.${ID}.2/24" "172.16.${ID}.69"
+build_ovs_container_path $OVS2Name $HOST1Name "172.16.${ID}.2/24" "00:00:00:00:00:05" "172.16.${ID}.1"
 set_v6intf_container $HOST1Name "veth${HOST1Name}${OVS2Name}" "2a0b:4e07:c4:${ID}::2/64" "2a0b:4e07:c4:${ID}::69"
 
 ####
@@ -310,7 +322,8 @@ add_container $HOSTIMAGE  $HOST2Name
 
 ####
 echo "Connecting ovs to router"
-build_ovs_container_path $OVS1Name $ROUTER2Name "192.168.63.2/24"
+build_ovs_container_path $OVS1Name $ROUTER2Name "192.168.63.2/24" "00:00:00:00:00:04"
+
 set_v6intf_container $ROUTER2Name "veth${ROUTER2Name}${OVS1Name}" "fd63::2/64"
 
 ####
@@ -333,6 +346,7 @@ ip link set veth2onos master vethonos
 ovs-vsctl add-port $OVS2Name veth2onospeer
 
 
-
+docker exec r2 sysctl -w net.ipv6.conf.all.forwarding=1
+docker exec r1 sysctl -w net.ipv4.conf.all.forwarding=1
 # install_onos_apps
 echo "Done"
