@@ -47,15 +47,16 @@ import org.onosproject.net.host.*;
 
 import org.onosproject.core.ApplicationId;
 import org.onosproject.core.CoreService;
+import org.onosproject.net.flow.DefaultFlowRule;
 import org.onosproject.net.flow.DefaultTrafficSelector;
 import org.onosproject.net.flow.TrafficSelector;
 
 import org.onosproject.net.flow.DefaultTrafficTreatment;
+import org.onosproject.net.flow.FlowRule;
 import org.onosproject.net.flow.TrafficTreatment;
 import org.onosproject.net.flowobjective.DefaultForwardingObjective;
 import org.onosproject.net.flowobjective.FlowObjectiveService;
 import org.onosproject.net.flowobjective.ForwardingObjective;
-import org.onosproject.net.host.InterfaceIpAddress;
 import org.onosproject.net.packet.PacketPriority;
 import org.onosproject.net.packet.PacketService;
 import org.onosproject.net.packet.PacketProcessor;
@@ -104,11 +105,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.HashSet;
 import java.util.Set;
-import java.util.jar.Attributes.Name;
-
-import javax.crypto.Mac;
-
-import java.nio.ByteBuffer;
 
 /**
  * Skeletal ONOS application component.
@@ -254,6 +250,48 @@ public class AppComponent {
         packetService.addProcessor(processor, PacketProcessor.director(2));
         packetService.addProcessor(arpHandler, PacketProcessor.director(3));
 
+        // TrafficSelector.Builder selector0 = DefaultTrafficSelector.builder()
+        //     .matchEthType(Ethernet.TYPE_ARP).matchInPort(PortNumber.portNumber(4));
+
+        // // drop the packet
+        // TrafficTreatment treatment0 = DefaultTrafficTreatment.builder()
+        //     .drop()
+        //     .build();
+
+        //     // Create the FlowRule
+        // FlowRule flowRule = DefaultFlowRule.builder()
+        //         .forDevice(DeviceId.deviceId("of:0000000000000002"))
+        //         .withSelector(selector0.build())
+        //         .withTreatment(treatment0)
+        //         .withPriority(50000)
+        //         .makePermanent()
+        //         .fromApp(appId)
+        //         .build();
+
+        // // Submit the FlowRule
+        // flowRuleService.applyFlowRules(flowRule);
+
+        // TrafficSelector.Builder selector1 = DefaultTrafficSelector.builder()
+        //     .matchEthType(Ethernet.TYPE_IPV6)
+        //     .matchIPProtocol((byte) 58) 
+        //     .matchInPort(PortNumber.portNumber(4))
+        //     .matchIcmpv6Code((byte) 135);
+
+        // // drop the packet
+        // TrafficTreatment treatment1 = DefaultTrafficTreatment.builder().drop().build();
+
+        // // Create the FlowRule
+        // FlowRule flowRule1 = DefaultFlowRule.builder()
+        //     .forDevice(DeviceId.deviceId("of:0000000000000002"))
+        //     .withSelector(selector1.build())
+        //     .withTreatment(treatment1)
+        //     .withPriority(50000)
+        //     .makePermanent()
+        //     .fromApp(appId)
+        //     .build();
+
+        // // Submit the FlowRule
+        // flowRuleService.applyFlowRules(flowRule1);
         
 
         // install a flowrule for packet-in
@@ -455,12 +493,16 @@ public class AppComponent {
             TrafficSelector.Builder selector2 = DefaultTrafficSelector.builder();
             selector2.matchEthType(Ethernet.TYPE_IPV6).matchIPv6Src(peerIP2.toIpPrefix());
             
-            if (i == 2){
+            if (i == 0){
+                port = PortNumber.portNumber("2");
+            }
+            else if (i == 2 ) {
                 port = PortNumber.portNumber("3");
             }
             else {
-                port = PortNumber.portNumber("2");
+                port = PortNumber.portNumber("6");
             }
+            
             ConnectPoint src = new ConnectPoint(devID, port);
             
             ConnectPoint dst = interfaceService.getMatchingInterface(IpAddress.valueOf(v6Peers.get(i))).connectPoint();
@@ -724,15 +766,17 @@ public class AppComponent {
 
                 if (bridgeTable6.get(recDevId).get(Pair.of(dstMac, dstIp)) == null) {
                     // the mapping of dst mac and forwarding port wasn't store in the table of the rec device
+                    log.info("flood6");
                     flood(context, dstMac, recDevId);
     
                 } 
                 else if (bridgeTable6.get(recDevId).get(Pair.of(dstMac, dstIp)) != null) {
                     // there is a entry store the mapping of dst mac and forwarding port
+                    log.info("installRule6");
                     installRule6(context, srcMac, dstMac, srcIp, dstIp, recDevId, bridgeTable6.get(recDevId).get(Pair.of(dstMac, dstIp)));
                     packetOut(context, bridgeTable6.get(recDevId).get(Pair.of(dstMac, dstIp)));
                 }
-
+                log.info("buildMac6Change");
                 // installRule6(context, srcMac, dstMac, srcIp, dstIp, recDevId, bridgeTable6.get(recDevId).get(Pair.of(dstMac, dstIp)));
                 buildMac6Change(srcMac, dstMac, srcIp, dstIp, recDevId);
                     
@@ -920,7 +964,7 @@ public class AppComponent {
         Ip4Address srcIpOther = null, dstIpOther = null;
         Ip4Prefix srcPrefixOther = null, dstPrefixOther = null;
 
-        log.info("[Function Called] buildMacChange:881");
+        log.info("[Function Called] buildMacChange:964");
         log.info("DST IP: {}", dstIp);
 
 
