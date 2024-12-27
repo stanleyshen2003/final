@@ -257,9 +257,9 @@ public class AppComponent {
         
 
         // install a flowrule for packet-in
-        // TrafficSelector.Builder selector = DefaultTrafficSelector.builder();
-        // selector.matchEthType(Ethernet.TYPE_ARP);
-        // packetService.requestPackets(selector.build(), PacketPriority.REACTIVE, appId);
+        TrafficSelector.Builder selector = DefaultTrafficSelector.builder();
+        selector.matchEthType(Ethernet.TYPE_ARP);
+        packetService.requestPackets(selector.build(), PacketPriority.REACTIVE, appId);
 
 
         TrafficSelector.Builder selector2 = DefaultTrafficSelector.builder();
@@ -377,6 +377,12 @@ public class AppComponent {
 
             TrafficSelector.Builder selector2 = DefaultTrafficSelector.builder();
             selector2.matchIPSrc(peerIP2.toIpPrefix()).matchIPDst(peerIP1.toIpPrefix()).matchEthType(Ethernet.TYPE_IPV4);
+
+            TrafficSelector.Builder selector3 = DefaultTrafficSelector.builder();
+            selector3.matchArpTpa(peerIP2).matchEthType(Ethernet.TYPE_ARP);
+
+            TrafficSelector.Builder selector4 = DefaultTrafficSelector.builder();
+            selector4.matchArpTpa(peerIP1).matchEthType(Ethernet.TYPE_ARP);
             
             if (i == 0){
                 port = PortNumber.portNumber("2");
@@ -392,8 +398,9 @@ public class AppComponent {
 
             log.info("Created intent from {}/{} to {}/{}", src.deviceId(), src.port(), dst.deviceId(), dst.port());
 
-            FilteredConnectPoint fsrc = new FilteredConnectPoint(src, selector1.build());
-            FilteredConnectPoint fdst = new FilteredConnectPoint(dst, selector2.build());
+            FilteredConnectPoint fsrc = new FilteredConnectPoint(src);
+            FilteredConnectPoint fdst = new FilteredConnectPoint(dst);
+
 
             PointToPointIntent intent1 = PointToPointIntent.builder()
                 .appId(appId)
@@ -413,8 +420,28 @@ public class AppComponent {
                 .priority(39999)
                 .build();
 
+            PointToPointIntent intent3 = PointToPointIntent.builder()
+                .appId(appId)
+                .key(Key.of(peerIP1.toString() + "-" + peerIP2.toString() + "ARP", appId))
+                .selector(selector3.build())
+                .filteredIngressPoint(fsrc)
+                .filteredEgressPoint(fdst)
+                .priority(49999)
+                .build();
+
+            PointToPointIntent intent4 = PointToPointIntent.builder()
+                .appId(appId)
+                .key(Key.of(peerIP2.toString() + "-" + peerIP1.toString() + "ARP", appId))
+                .selector(selector4.build())
+                .filteredIngressPoint(fdst)
+                .filteredEgressPoint(fsrc)
+                .priority(49999)
+                .build();
+
             intentService.submit(intent1);
             intentService.submit(intent2);
+            intentService.submit(intent3);
+            intentService.submit(intent4);
             
         }
 
@@ -894,6 +921,7 @@ public class AppComponent {
         Ip4Prefix srcPrefixOther = null, dstPrefixOther = null;
 
         log.info("[Function Called] buildMacChange:881");
+        log.info("DST IP: {}", dstIp);
 
 
 
