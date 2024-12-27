@@ -27,7 +27,7 @@ import org.onosproject.net.config.NetworkConfigService;
 import org.onosproject.net.config.ConfigFactory;
 
 import org.onlab.packet.IpAddress;
-
+import org.onlab.packet.IpPrefix;
 import org.onosproject.cfg.ComponentConfigService;
 import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
@@ -250,48 +250,49 @@ public class AppComponent {
         packetService.addProcessor(processor, PacketProcessor.director(2));
         packetService.addProcessor(arpHandler, PacketProcessor.director(3));
 
-        // TrafficSelector.Builder selector0 = DefaultTrafficSelector.builder()
-        //     .matchEthType(Ethernet.TYPE_ARP).matchInPort(PortNumber.portNumber(4));
+        TrafficSelector.Builder selector0 = DefaultTrafficSelector.builder()
+            .matchEthType(Ethernet.TYPE_ARP).matchInPort(PortNumber.portNumber(4));
 
-        // // drop the packet
-        // TrafficTreatment treatment0 = DefaultTrafficTreatment.builder()
-        //     .drop()
-        //     .build();
+        // drop the packet
+        TrafficTreatment treatment0 = DefaultTrafficTreatment.builder()
+            .drop()
+            .build();
 
-        //     // Create the FlowRule
-        // FlowRule flowRule = DefaultFlowRule.builder()
-        //         .forDevice(DeviceId.deviceId("of:0000000000000002"))
-        //         .withSelector(selector0.build())
-        //         .withTreatment(treatment0)
-        //         .withPriority(50000)
-        //         .makePermanent()
-        //         .fromApp(appId)
-        //         .build();
+            // Create the FlowRule
+        FlowRule flowRule = DefaultFlowRule.builder()
+                .forDevice(DeviceId.deviceId("of:0000000000000002"))
+                .withSelector(selector0.build())
+                .withTreatment(treatment0)
+                .withPriority(50000)
+                .makePermanent()
+                .fromApp(appId)
+                .build();
 
-        // // Submit the FlowRule
-        // flowRuleService.applyFlowRules(flowRule);
+        // Submit the FlowRule
+        flowRuleService.applyFlowRules(flowRule);
 
-        // TrafficSelector.Builder selector1 = DefaultTrafficSelector.builder()
-        //     .matchEthType(Ethernet.TYPE_IPV6)
-        //     .matchIPProtocol((byte) 58) 
-        //     .matchInPort(PortNumber.portNumber(4))
-        //     .matchIcmpv6Code((byte) 135);
+        TrafficSelector.Builder selector1 = DefaultTrafficSelector.builder()
+            .matchEthType(Ethernet.TYPE_IPV6)
+            .matchIPProtocol((byte) 58) 
+            .matchInPort(PortNumber.portNumber(4))
+            .matchIcmpv6Code((byte) 135);
 
-        // // drop the packet
-        // TrafficTreatment treatment1 = DefaultTrafficTreatment.builder().drop().build();
+        // drop the packet
+        TrafficTreatment treatment1 = DefaultTrafficTreatment.builder().drop().build();
 
-        // // Create the FlowRule
-        // FlowRule flowRule1 = DefaultFlowRule.builder()
-        //     .forDevice(DeviceId.deviceId("of:0000000000000002"))
-        //     .withSelector(selector1.build())
-        //     .withTreatment(treatment1)
-        //     .withPriority(50000)
-        //     .makePermanent()
-        //     .fromApp(appId)
-        //     .build();
+        // Create the FlowRule
+        FlowRule flowRule1 = DefaultFlowRule.builder()
+            .forDevice(DeviceId.deviceId("of:0000000000000002"))
+            .withSelector(selector1.build())
+            .withTreatment(treatment1)
+            .withPriority(50000)
+            .makePermanent()
+            .fromApp(appId)
+            .build();
 
-        // // Submit the FlowRule
-        // flowRuleService.applyFlowRules(flowRule1);
+        // Submit the FlowRule
+        flowRuleService.applyFlowRules(flowRule1);
+
         
 
         // install a flowrule for packet-in
@@ -308,6 +309,46 @@ public class AppComponent {
         selector3.matchEthType(Ethernet.TYPE_IPV4);
         packetService.requestPackets(selector3.build(), PacketPriority.REACTIVE, appId);
 
+        TrafficSelector.Builder selector4 = DefaultTrafficSelector.builder()
+            .matchEthType(Ethernet.TYPE_IPV6)
+            .matchIPProtocol((byte) 58) 
+            .matchIcmpv6Code((byte) 135)
+            .matchIPv6Src(IpPrefix.valueOf("fd27::2/128"));
+        
+        
+        ConnectPoint cp = new ConnectPoint(DeviceId.deviceId("of:0000000000000002"), PortNumber.portNumber(4));
+        ConnectPoint cp2 = new ConnectPoint(DeviceId.deviceId("of:0000000000000001"), PortNumber.portNumber(6));
+
+        FilteredConnectPoint fcp = new FilteredConnectPoint(cp);
+        FilteredConnectPoint fcp2 = new FilteredConnectPoint(cp2);
+
+        PointToPointIntent intent = PointToPointIntent.builder()
+            .appId(appId)
+            .key(Key.of("teamate ndp", appId))
+            .filteredIngressPoint(fcp)
+            .filteredEgressPoint(fcp2)
+            .selector(selector4.build())
+            .priority(60000)
+            .build();
+
+        intentService.submit(intent);
+
+        TrafficSelector selector5 = DefaultTrafficSelector.builder()
+            .matchEthType(Ethernet.TYPE_ARP)
+            .matchArpSpa(Ip4Address.valueOf("192.168.27.2"))
+            .build();
+
+        
+        PointToPointIntent intent2 = PointToPointIntent.builder()
+            .appId(appId)
+            .key(Key.of("teamate arp", appId))
+            .filteredIngressPoint(fcp)
+            .filteredEgressPoint(fcp2)
+            .selector(selector5)
+            .priority(60000)
+            .build();
+
+        intentService.submit(intent2);
 
 
         log.info("Started");
@@ -335,6 +376,8 @@ public class AppComponent {
         TrafficSelector.Builder selector3 = DefaultTrafficSelector.builder();
         selector3.matchEthType(Ethernet.TYPE_IPV4);
         packetService.cancelPackets(selector3.build(), PacketPriority.REACTIVE, appId);
+
+        intentService.getIntentsByAppId(appId).forEach(intentService::withdraw);
 
         log.info("Stopped");
     }
