@@ -13,6 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+// 0327
 package nycu.winlab.vRouter;
 
 import static org.onosproject.net.config.NetworkConfigEvent.Type.CONFIG_ADDED;
@@ -225,6 +227,16 @@ public class AppComponent {
                 }
             }
         }
+
+                log.info("************");
+        // log.info("I want to /find srcip:{} dstip:{}", srcIp, dstIp);
+        log.info("Travel macTable6");
+        for (Map.Entry<Ip6Address, MacAddress> entry : macTable6.entrySet()) {
+            Ip6Prefix prefix = entry.getKey();
+            Ip6Address nextHop = entry.getValue();
+            log.info("ip6: {}, macA: {}", prefix, nextHop);
+        }
+        log.info("************");
         
 
         // add a packet processor to packetService
@@ -544,6 +556,7 @@ public class AppComponent {
                 }
             }
 
+        /*
             // ARP packet
             // else if ( ethType == Ethernet.TYPE_ARP) {
             //     ARP arpPacket = (ARP) ethPkt.getPayload();
@@ -582,6 +595,7 @@ public class AppComponent {
             //     context.block();
             //     return;
             // }
+        */
 
             if (ethType == Ethernet.TYPE_IPV4) {
                 MacAddress srcMac = ethPkt.getSourceMAC();
@@ -613,6 +627,10 @@ public class AppComponent {
                     installRule(context, srcMac, dstMac, srcIp, dstIp, recDevId, bridgeTable.get(recDevId).get(Pair.of(dstMac, dstIp)));
                     packetOut(context, bridgeTable.get(recDevId).get(Pair.of(dstMac, dstIp)));
                 }
+
+                buildMacChange(srcMac, dstMac, srcIp, dstIp, recDevId);
+
+
                 context.block();
             }
 
@@ -622,7 +640,13 @@ public class AppComponent {
                 Ip6Address srcIp = Ip6Address.valueOf(((IPv6) ethPkt.getPayload()).getSourceAddress());
                 MacAddress dstMac = ethPkt.getDestinationMAC();
                 Ip6Address dstIp = Ip6Address.valueOf(((IPv6) ethPkt.getPayload()).getDestinationAddress());
+
+                log.info("111111111111111111111");
+                log.info("srcIp: {}, srcMac: {}\ndstIp: {}, dstMac: {}", srcIp, srcMac, dstIp, dstMac);
+                log.info("111111111111111111111");
+
                 if (bridgeTable6.get(recDevId) == null) {
+                    log.info("Got new recDev in ip6");
                     bridgeTable6.put(recDevId, new HashMap<>());
                 }
 
@@ -643,6 +667,10 @@ public class AppComponent {
                     installRule6(context, srcMac, dstMac, srcIp, dstIp, recDevId, bridgeTable6.get(recDevId).get(Pair.of(dstMac, dstIp)));
                     packetOut(context, bridgeTable6.get(recDevId).get(Pair.of(dstMac, dstIp)));
                 }
+
+                // installRule6(context, srcMac, dstMac, srcIp, dstIp, recDevId, bridgeTable6.get(recDevId).get(Pair.of(dstMac, dstIp)));
+                buildMac6Change(srcMac, dstMac, srcIp, dstIp, recDevId);
+                    
                 context.block();
             }
 
@@ -727,6 +755,22 @@ public class AppComponent {
         return null;
     }
 
+    private MacAddress getPeerMac6(Ip6Address IP) {
+        // find peer's ipv4 address
+        NameConfig config = cfgService.getConfig(appId, NameConfig.class);
+        List<String> v6Peers = config.v6Peers();
+
+        for (int i = 0; i < v6Peers.size(); i+=2) {
+            if (IP.toString().equals(v6Peers.get(i))) {
+                return macTable6.get(Ip6Address.valueOf(v6Peers.get(i+1)));
+            }
+            else if (IP.toString().equals(v6Peers.get(i+1))) {
+                return macTable6.get(Ip6Address.valueOf(v6Peers.get(i)));
+            }
+        }
+        return null;
+    }
+
     private void installMacChanging(Ip4Prefix srcIp, Ip4Prefix dstIp, MacAddress srcMac, MacAddress dstMac, ConnectPoint srcCP, ConnectPoint dstCP) {
         TrafficSelector.Builder selectorBuilder = DefaultTrafficSelector.builder()
             .matchEthType(Ethernet.TYPE_IPV4)
@@ -754,7 +798,42 @@ public class AppComponent {
         intentService.submit(intent);
     }
 
+    private void installMac6Changing(Ip6Prefix srcIp, Ip6Prefix dstIp, MacAddress srcMac, MacAddress dstMac, ConnectPoint srcCP, ConnectPoint dstCP) {
+        TrafficSelector.Builder selectorBuilder = DefaultTrafficSelector.builder()
+            .matchEthType(Ethernet.TYPE_IPV6)
+            .matchIPDst(dstIp)
+            .matchIPSrc(srcIp);
+
+        TrafficTreatment treatment = DefaultTrafficTreatment.builder()
+            .setEthSrc(srcMac)
+            .setEthDst(dstMac)
+            .build();
+
+        FilteredConnectPoint fsrc = new FilteredConnectPoint(dstCP);
+        FilteredConnectPoint fdst = new FilteredConnectPoint(srcCP);
+
+        PointToPointIntent intent = PointToPointIntent.builder()
+            .appId(appId)
+            .key(Key.of(srcIp.toString() + "-" + dstIp.toString(), appId))
+            .selector(selectorBuilder.build())
+            .filteredIngressPoint(fsrc)
+            .filteredEgressPoint(fdst)
+            .priority(39999)
+            .treatment(treatment)
+            .build();
+
+        intentService.submit(intent);
+    }
+
+
     private ConnectPoint getIpConnectPoint(Ip4Address ip) {
+        for (Host host : hostService.getHostsByIp(ip)) {
+            return host.location();
+        }
+        return null;
+    }
+
+    private ConnectPoint getIp6ConnectPoint(Ip6Address ip) {
         for (Host host : hostService.getHostsByIp(ip)) {
             return host.location();
         }
@@ -858,11 +937,134 @@ public class AppComponent {
     }
 
 
+    private Boolean buildMac6Change(MacAddress srcMac, MacAddress dstMac, Ip6Address srcIp, Ip6Address dstIp, DeviceId recDevId) {
+        NameConfig config = cfgService.getConfig(appId, NameConfig.class);
+
+        Collection<RouteInfo> routes = routeService.getRoutes(new RouteTableId("ipv6"));
+        routeTable6.clear();
+        for (RouteInfo route : routes) {
+            for (ResolvedRoute resRoute : route.allRoutes()) {
+                routeTable6.put(resRoute.prefix().getIp6Prefix(), resRoute.nextHop().getIp6Address());
+            }
+        }
+
+        // 遍歷 routeTable6
+        log.info("************");
+        log.info("I want to find srcip:{} dstip:{}", srcIp, dstIp);
+        log.info("Travel routeTable6");
+        for (Map.Entry<Ip6Prefix, Ip6Address> entry : routeTable6.entrySet()) {
+            Ip6Prefix prefix = entry.getKey();
+            Ip6Address nextHop = entry.getValue();
+            log.info("Prefix: {}, Next Hop: {}", prefix, nextHop);
+        }
+        log.info("************");
+
+        Boolean ipFromOther = false, ipToOther = false;
+        Ip6Address srcIpOther = null, dstIpOther = null;
+        Ip6Prefix srcPrefixOther = null, dstPrefixOther = null;
+
+        if (ipFromOther) {
+            log.info("IP from other: {}", srcIpOther);
+            log.info("Real dst IP = {}", srcIp);
+        }
+
+        if (ipToOther) {
+            log.info("IP to other: {}", dstIpOther);
+            log.info("Real dst IP = {}", dstIp);
+        }
+
+        // check if ip from/to other
+        for (Map.Entry<Ip6Prefix, Ip6Address> entry: routeTable6.entrySet()){
+            Ip6Prefix prefix = entry.getKey();
+            log.info("Prefix: {}", prefix);
+            if (prefix.contains(srcIp)) {
+                ipFromOther = true;
+                log.info("src IP: {}", srcIp);
+                srcIpOther = entry.getValue();
+                srcPrefixOther = prefix;
+            }
+            if (prefix.contains(dstIp)) {
+                ipToOther = true;
+                log.info("dst IP: {}", dstIp);
+                dstIpOther = entry.getValue();
+                dstPrefixOther = prefix;
+            }
+        }
+
+        if (ipFromOther) {
+            if (ipToOther) {
+                // cross domain
+                MacAddress newSrcMac = getPeerMac6(dstIpOther);
+                MacAddress newDstMac = macTable6.get(dstIpOther);
+
+                ConnectPoint srcCP = getIp6ConnectPoint(srcIpOther);
+                ConnectPoint dstCP = getIp6ConnectPoint(dstIpOther);
+
+                log.info("+++++++++++");
+                log.info("From other but To other: srcCp:{}/dstCp:{}", srcCP, dstCP);
+                log.info("+++++++++++");
+
+                if (srcCP == null || dstCP == null) {
+                    
+                    return false;
+                }
+
+                installMac6Changing(srcPrefixOther, dstPrefixOther, newSrcMac, newDstMac, srcCP, dstCP);
+            }
+            else {
+                // other -> local
+                log.info("From other, not to other");
+
+                MacAddress newSrcMac = MacAddress.valueOf(config.gatewayMac());
+                MacAddress newDstMac = macTable6.get(dstIp);
+                if (newDstMac == null){
+                    log.info("There is no newDstMac");
+                    return false;
+                }
+                ConnectPoint srcCP = getIp6ConnectPoint(srcIpOther);
+                ConnectPoint dstCP = getIp6ConnectPoint(dstIp);
+
+                log.info("+++++++++++");
+                log.info("From other but Not to other: srcCp:{}/dstCp:{}", srcCP, dstCP);
+                log.info("+++++++++++");
+
+                if (srcCP == null || dstCP == null) {
+                    return false;
+                }
+                
+                installMac6Changing(srcPrefixOther, dstIp.toIpPrefix().getIp6Prefix(), newSrcMac, newDstMac, srcCP, dstCP);
+            }
+            return true;
+        }
+        else {
+            if (ipToOther) {
+                // local -> other
+                MacAddress newSrcMac = getPeerMac6(dstIpOther);
+                MacAddress newDstMac = macTable6.get(dstIpOther);
+                
+                ConnectPoint srcCP = getIp6ConnectPoint(srcIp);
+                ConnectPoint dstCP = getIp6ConnectPoint(dstIpOther);
+
+                log.info("+++++++++++");
+                log.info("Not from other: srcCp:{}/dstCp:{}", srcCP, dstCP);
+                log.info("+++++++++++");
+
+                if (srcCP == null || dstCP == null) {
+                    return false;
+                }
+
+                installMac6Changing(srcIp.toIpPrefix().getIp6Prefix(), dstPrefixOther, newSrcMac, newDstMac, srcCP, dstCP);
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void installRule(PacketContext context, MacAddress srcMac, MacAddress dstMac, Ip4Address srcIp, Ip4Address dstIp,
                              DeviceId recDevId, PortNumber outPort) {
         log.info("MAC address `{}` is matched on `{}`. Install a flow rule.", dstMac, recDevId);
 
-        buildMacChange(srcMac, dstMac, srcIp, dstIp, recDevId);
+        // buildMacChange(srcMac, dstMac, srcIp, dstIp, recDevId);
         TrafficSelector.Builder selectorBuilder = DefaultTrafficSelector.builder()
                     .matchEthType(Ethernet.TYPE_IPV4)
                     .matchEthDst(dstMac)
@@ -893,6 +1095,7 @@ public class AppComponent {
                              DeviceId recDevId, PortNumber outPort) {
         log.info("MAC address `{}` is matched on `{}`. Install a flow rule.", dstMac, recDevId);
 
+        // buildMac6Change(srcMac, dstMac, srcIp, dstIp, recDevId);
         TrafficSelector.Builder selectorBuilder = DefaultTrafficSelector.builder()
                     .matchEthType(Ethernet.TYPE_IPV6)
                     .matchEthDst(dstMac)
