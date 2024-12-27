@@ -7,3 +7,5 @@ onos-app localhost install! target/vRouter-1.0-SNAPSHOT.oar
 ssh -o "StrictHostKeyChecking=no" -o GlobalKnownHostsFile=/dev/null -o UserKnownHostsFile=/dev/null onos@localhost -p 8101
 
 onos-netcfg localhost config.json
+
+onos-app localhost deactivate nycu.winlab.vRouter && onos-app localhost uninstall nycu.winlab.vRouter

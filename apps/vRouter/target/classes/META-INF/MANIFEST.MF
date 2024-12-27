@@ -1,5 +1,5 @@
 Manifest-Version: 1.0
-Bnd-LastModified: 1735312523619
+Bnd-LastModified: 1735318215271
 Build-Jdk: 11.0.24
 Built-By: stanley
 Bundle-Description: ONOS OSGi bundle archetype

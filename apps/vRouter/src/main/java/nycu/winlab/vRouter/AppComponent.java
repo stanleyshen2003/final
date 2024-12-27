@@ -206,19 +206,19 @@ public class AppComponent {
             for (InterfaceIpAddress ip : inf.ipAddressesList()) {
                 if (ip.ipAddress().isIp4()) {
                     arpTable.put(ip.ipAddress().getIp4Address(), inf.mac());
-                    log.info("write ip4: {}, mac: {}", ip.ipAddress().getIp4Address(), inf.mac());
+                    // log.info("write ip4: {}, mac: {}", ip.ipAddress().getIp4Address(), inf.mac());
                 }
                 else {
                     macTable6.put(ip.ipAddress().getIp6Address(), inf.mac());
-                    log.info("write ip6: {}, mac: {}", ip.ipAddress().getIp6Address(), inf.mac());
+                    // log.info("write ip6: {}, mac: {}", ip.ipAddress().getIp6Address(), inf.mac());
                 }
             }
         }
 
         arpTable.put(Ip4Address.valueOf(config.gatewayIp4()), MacAddress.valueOf(config.gatewayMac()));
-        log.info("write ip4: {}, mac: {}", config.gatewayIp4(), config.gatewayMac());
+        // log.info("write ip4: {}, mac: {}", config.gatewayIp4(), config.gatewayMac());
         macTable6.put(Ip6Address.valueOf(config.gatewayIp6()), MacAddress.valueOf(config.gatewayMac()));
-        log.info("write ip6: {}, mac: {}", config.gatewayIp6(), config.gatewayMac());
+        // log.info("write ip6: {}, mac: {}", config.gatewayIp6(), config.gatewayMac());
     }
     
 
@@ -378,14 +378,14 @@ public class AppComponent {
             TrafficSelector.Builder selector2 = DefaultTrafficSelector.builder();
             selector2.matchIPSrc(peerIP2.toIpPrefix()).matchIPDst(peerIP1.toIpPrefix()).matchEthType(Ethernet.TYPE_IPV4);
             
-            if (i == 2){
-                port = PortNumber.portNumber("3");
-            }
-            else if (i==3) {
+            if (i == 0){
                 port = PortNumber.portNumber("2");
             }
+            else if (i == 2 ) {
+                port = PortNumber.portNumber("3");
+            }
             else {
-                port = PortNumber.portNumber("4");
+                port = PortNumber.portNumber("6");
             }
             ConnectPoint src = new ConnectPoint(devID, port);
             ConnectPoint dst = interfaceService.getMatchingInterface(IpAddress.valueOf(v4Peers.get(i))).connectPoint();
@@ -893,15 +893,9 @@ public class AppComponent {
         Ip4Address srcIpOther = null, dstIpOther = null;
         Ip4Prefix srcPrefixOther = null, dstPrefixOther = null;
 
-        // if (ipFromOther) {
-        //     log.info("IP from other: {}", srcIpOther);
-        //     log.info("Real dst IP = {}", srcIp);
-        // }
+        log.info("[Function Called] buildMacChange:881");
 
-        // if (ipToOther) {
-        //     log.info("IP to other: {}", dstIpOther);
-        //     log.info("Real dst IP = {}", dstIp);
-        // }
+
 
         // check if ip from/to other
         for (Map.Entry<Ip4Prefix, Ip4Address> entry: routeTable.entrySet()){
@@ -919,6 +913,16 @@ public class AppComponent {
                 dstIpOther = entry.getValue();
                 dstPrefixOther = prefix;
             }
+        }
+
+        if (ipFromOther) {
+            log.info("IP from other: {}", srcIpOther);
+            log.info("Real dst IP = {}", srcIp);
+        }
+
+        if (ipToOther) {
+            log.info("IP to other: {}", dstIpOther);
+            log.info("Real dst IP = {}", dstIp);
         }
 
         if (ipFromOther) {
